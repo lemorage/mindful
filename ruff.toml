@@ -1,0 +1,30 @@
+target-version = ["py310", "py311", "py312", "py313"]
+line-length = 120
+
+[lint]
+select = [
+    "E",    # pycodestyle errors (PEP 8)
+    "F",    # Pyflakes (logical errors, unused imports, etc.)
+    "I",    # Enable import sorting
+    "W",    # pycodestyle warnings
+    "C90",  # Pylint conventions
+    "N",    # Naming conventions
+    "D",    # pydocstyle (docstring style enforcement)
+    "Q",    # Flake8 Quotes (enforce consistent use of quotes)
+    "PT",   # Pytoml (for TOML files)
+    "I001", # isort
+    "ANN",  # Enforce type annotations
+    "FBT",  # Boolean type checks (type consistency)
+    "PLC",  # Pylint comments
+]
+ignore = ["E203", "E266", "E501", "D107", "D203", "D211", "D213"]
+
+[lint.mccabe]
+max-complexity = 10
+
+[lint.isort]
+force-sort-within-sections = true
+
+[format]
+quote-style = "double"
+indent-style = "space"

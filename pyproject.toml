@@ -1,0 +1,23 @@
+[project]
+name = "mindful"
+version = "0.1.0"
+description = "Add your description here"
+license = "BSD-3-Clause"
+readme = "README.md"
+authors = [
+    { name = "Glenn Miao", email = "one.lemorage@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+mindful = "mindful:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.2",
+]
