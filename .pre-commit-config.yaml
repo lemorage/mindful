@@ -1,0 +1,73 @@
+ci:
+  autofix_prs: false
+  autoupdate_schedule: 'monthly'
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--enforce-all", "--maxkb=500"]
+        # Prevent giant files from being committed.
+      - id: check-case-conflict
+        # Check for files with names that would conflict on a case-insensitive
+        # filesystem like MacOS HFS+ or Windows FAT.
+      - id: check-merge-conflict
+        # Check for files that contain merge conflict strings.
+      - id: check-symlinks
+        # Checks for symlinks which do not point to anything.
+      - id: check-json
+        # Attempts to load all json files to verify syntax.
+      - id: check-toml
+        # Attempts to load all TOML files to verify syntax.
+      - id: check-yaml
+        # Attempts to load all yaml files to verify syntax.
+        exclude: ".*(.github.*)$"
+      - id: detect-private-key
+        # Checks for the existence of private keys.
+      - id: end-of-file-fixer
+        # Makes sure files end in a newline and only a newline.
+        exclude: ".*(data.*|extern.*|licenses.*|_static.*)$"
+      - id: trailing-whitespace
+        # Trims trailing whitespace.
+        exclude_types: [python]  # Covered by Ruff W291.
+        exclude: ".*(data.*|extern.*|licenses.*|_static.*)$"
+
+  - repo: https://github.com/pre-commit/pygrep-hooks
+    rev: v1.10.0
+    hooks:
+      - id: text-unicode-replacement-char
+        # Forbid files which have a UTF-8 Unicode replacement character.
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+        args: ["--write-changes"]
+        additional_dependencies:
+          - tomli
+
+  - repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+      - id: black
+        args: ["--line-length", "120"]
+        files: \.py$
+
+  - repo: local
+    hooks:
+      - id: uv-ruff-format
+        name: uv-ruff-format
+        description: let uv run ruff to sort imports and format code
+        entry: uv run ruff check --select I --fix && uv run ruff format
+        language: python
+        pass_filenames: false
+        files: ^(.*/)?(uv\.lock|pyproject\.toml)$
+
+      - id: uv-lock
+        name: uv-lock
+        description: run uv lock to update lock file
+        entry: uv lock
+        language: python
+        pass_filenames: false
+        files: ^(.*/)?(uv\.lock|pyproject\.toml)$
