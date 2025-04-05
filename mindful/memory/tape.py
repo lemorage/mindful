@@ -1,6 +1,7 @@
 from datetime import datetime
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union, Callable
 from uuid import uuid4
+import numpy as np
 from pydantic import BaseModel, Field
 
 
@@ -87,3 +88,76 @@ class Tape(BaseModel):
             description (str): A brief explanation of the relationship between the notes.
         """
         self.links[related_tape_id] = description
+
+
+class TapeDeck:
+    """A memory management system for storing and retrieving Tape objects."""
+
+    def __init__(self, embed_func: Optional[Callable[[str], List[float]]] = None):
+        self.tapes: Dict[str, Tape] = {}
+        self.embed_func = embed_func  # to be replaced
+
+    def add_tape(self, tape: Tape) -> None:
+        """Add a new Tape, generating an embedding if embed_func is provided."""
+        if self.embed_func and tape.embedding_vector is None:
+            tape.embedding_vector = self.embed_func(tape.content)
+        self.tapes[tape.id] = tape
+
+    def get_tape(self, tape_id: str) -> Optional[Tape]:
+        """Retrieve a Tape by ID and update access metadata."""
+        tape = self.tapes.get(tape_id)
+        if tape:
+            tape.access_count += 1
+            tape.last_accessed = datetime.now()
+        return tape
+
+    def update_tape(self, tape_id: str, new_content: str) -> None:
+        """Update a Tape's content and embedding."""
+        tape = self.get_tape(tape_id)
+        if tape:
+            tape.update_content(new_content)
+            if self.embed_func:
+                tape.embedding_vector = self.embed_func(new_content)
+
+    def delete_tape(self, tape_id: str) -> None:
+        """Delete a Tape by ID."""
+        if tape_id in self.tapes:
+            del self.tapes[tape_id]
+
+    def link_tapes(self, tape_id1: str, tape_id2: str, description: str) -> None:
+        """Create a bidirectional link between two Tapes."""
+        tape1 = self.get_tape(tape_id1)
+        tape2 = self.get_tape(tape_id2)
+        if tape1 and tape2:
+            tape1.add_link(tape_id2, description)
+            tape2.add_link(tape_id1, f"replied_by_{description}")
+
+    def retrieve_relevant(self, query: str, top_k: int = 5) -> List[Tape]:
+        """Retrieve relevant Tapes using embeddings if available, otherwise keywords."""
+        if self.embed_func and any(t.embedding_vector for t in self.tapes.values()):
+            query_embedding = self.embed_func(query)
+            scores = {}
+            for tape in self.tapes.values():
+                if tape.embedding_vector:
+                    # Cosine similarity
+                    dot_product = np.dot(query_embedding, tape.embedding_vector)
+                    norm = np.linalg.norm(query_embedding) * np.linalg.norm(tape.embedding_vector)
+                    similarity = dot_product / norm if norm > 0 else 0
+
+                    # priority 10 = 1.5x, priority 1 = 1.0x
+                    weighted_score = similarity * (1 + (tape.priority - 1) * 0.05)
+                    scores[tape.id] = weighted_score
+            sorted_tapes = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
+            return [self.tapes[tid] for tid, _ in sorted_tapes]
+        else:
+            # Fallback to keyword matching
+            keywords = set(query.lower().split())
+            scores = {}
+            for tape in self.tapes.values():
+                tape_keywords = set(tape.keywords)
+                score = len(keywords.intersection(tape_keywords))
+                if score > 0:
+                    weighted_score = score * (1 + (tape.priority - 1) * 0.05)
+                    scores[tape.id] = weighted_score
+            sorted_tapes = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
+            return [self.tapes[tid] for tid, _ in sorted_tapes]
