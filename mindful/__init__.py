@@ -1,2 +1,4 @@
-def main() -> None:
-    print("Hello from mindful!")
+__version__ = "0.0.1"
+
+
+from .main import mindful
