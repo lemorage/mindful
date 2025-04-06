@@ -5,6 +5,7 @@ import requests
 import time
 
 
+# TODO: to be replaced by oop style
 class Agent:
     model_providers = {
         "anthropic": "ANTHROPIC_API_KEY",
@@ -33,12 +34,17 @@ class Agent:
             raise ValueError(f"API key for {model} not found in environment variables.")
 
     def _generate_with_openai(self, prompt: str) -> str:
-        """Use OpenAI to generate content."""
-        openai.api_key = self._api_key
-        response = openai.Completion.create(
-            engine="text-embedding-3-large", prompt=prompt, max_tokens=150, n=1, stop=None, temperature=0.7
+        """Use OpenAI Chat Completions to generate content."""
+        client = openai.OpenAI(api_key=self._api_key)
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=150,
+            n=1,
+            stop=None,
+            temperature=0.7,
         )
-        return response.choices[0].text.strip()
+        return response.choices[0].message.content.strip()
 
     def _generate_with_anthropic(self, prompt: str) -> str:
         """Use Anthropic to generate content."""
@@ -243,7 +249,7 @@ class Agent:
             }}
             ```
         """
-        response = self.agent.generate_content(prompt)
+        response = self.generate_content(prompt)
 
         try:
             # Extract the JSON part from the response
