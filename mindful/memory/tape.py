@@ -33,7 +33,7 @@ class Tape(BaseModel):
 
     # Core tontent
     content: str = Field(..., description="Main textual content of the memory note.")
-    role: str = Field(default="user", description="Role associated with this memory (e.g., 'user', 'assistant').")
+    role: str = Field(..., description="Role associated with this memory (e.g., 'user', 'assistant').")
     uid: str = Field(
         default_factory=lambda: datetime.now().strftime("%Y%m%d%H%M%S"), description="Time-based unique identifier."
     )
@@ -97,11 +97,36 @@ class TapeDeck:
         self.tapes: Dict[str, Tape] = {}
         self.embed_func = embed_func  # to be replaced
 
-    def add_tape(self, tape: Tape) -> None:
-        """Add a new Tape, generating an embedding if embed_func is provided."""
-        if self.embed_func and tape.embedding_vector is None:
+    def add_tape(self, content: str, role: str) -> None:
+        """
+        Add a new Tape to the deck from raw content and role.
+        Automatically handles embedding and placeholder metadata.
+
+        Returns:
+            Tape: The created and stored Tape object.
+        """
+        # Stub/default metadata - TODO: can later be inferred by an agent
+        category = "unsorted"
+        context = "default"
+        keywords = []
+        links = {}
+        related_queries = []
+
+        # Create the Tape
+        tape = Tape(
+            content=content,
+            role=role,
+            category=category,
+            context=context,
+            keywords=keywords,
+            links=links,
+            related_queries=related_queries,
+        )
+
+        if self.embed_func and not tape.embedding_vector:
             tape.embedding_vector = self.embed_func(tape.content)
         self.tapes[tape.id] = tape
+        return tape
 
     def get_tape(self, tape_id: str) -> Optional[Tape]:
         """Retrieve a Tape by ID and update access metadata."""
