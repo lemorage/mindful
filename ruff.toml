@@ -5,6 +5,7 @@ line-length = 120
 select = [
     "E",    # pycodestyle errors (PEP 8)
     "F",    # Pyflakes (logical errors, unused imports, etc.)
+    "F401", # Explicitly include unused import check (Pyflakes)
     "I",    # Enable import sorting
     "W",    # pycodestyle warnings
     "C90",  # Pylint conventions
