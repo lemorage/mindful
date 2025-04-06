@@ -4,6 +4,8 @@ from uuid import uuid4
 import numpy as np
 from pydantic import BaseModel, Field
 
+from mindful.agent import Agent
+
 
 class Tape(BaseModel):
     """
@@ -39,7 +41,7 @@ class Tape(BaseModel):
     )
     id: str = Field(default_factory=lambda: str(uuid4()), description="Universally unique identifier for the note.")
 
-    # Dynamic metadata (handled by LLM)
+    # Dynamic metadata (handled by mindful agent)
     category: str = Field(..., description="High-level classification of the note.")
     context: str = Field(..., description="Situational or thematic context of the note.")
     keywords: List[str] = Field(default_factory=list, description="List of keywords for retrieval and indexing.")
@@ -93,8 +95,9 @@ class Tape(BaseModel):
 class TapeDeck:
     """A memory management system for storing and retrieving Tape objects."""
 
-    def __init__(self, embed_func: Optional[Callable[[str], List[float]]] = None):
+    def __init__(self, model, embed_func: Optional[Callable[[str], List[float]]] = None):
         self.tapes: Dict[str, Tape] = {}
+        self.agent = Agent(model)
         self.embed_func = embed_func  # to be replaced
 
     def add_tape(self, content: str, role: str) -> None:
@@ -105,10 +108,10 @@ class TapeDeck:
         Returns:
             Tape: The created and stored Tape object.
         """
-        # Stub/default metadata - TODO: can later be inferred by an agent
-        category = "unsorted"
-        context = "default"
-        keywords = []
+        # Stub/default metadata
+        category, context, keywords = self.agent.generate_metadata(content)
+
+        # TODO: can later be executed through tool calling by an agent, empty for now
         links = {}
         related_queries = []
 

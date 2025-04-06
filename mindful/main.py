@@ -12,7 +12,7 @@ def mindful(chat_method):
     def wrapper(self, user_input: str, *args, **kwargs) -> str:
         """This will handle memory operations behind the scenes."""
         if not hasattr(self, "_mindful_core"):
-            self._mindful_core = TapeDeck()
+            self._mindful_core = TapeDeck("openai")  # TODO: to make it dynamically set
 
         # Store user input as a 'user' Tape
         user_tape = self._mindful_core.add_tape(content=user_input, role="user")
