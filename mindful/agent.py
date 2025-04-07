@@ -4,6 +4,8 @@ import openai
 import requests
 import time
 
+from typing import List
+
 
 # TODO: to be replaced by oop style
 class Agent:
@@ -259,3 +261,6 @@ class Agent:
         except (IndexError, ValueError) as e:
             print(f"Error extracting metadata: {e}")
             return "unknown", "unknown", []  # Default return values
+
+    def embed(self, content: str) -> List[float]:
+        return [0.0] * 768  # Placeholder for embedding logic

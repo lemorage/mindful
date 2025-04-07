@@ -44,12 +44,12 @@ class Tape(BaseModel):
     # Dynamic metadata (handled by mindful agent)
     category: str = Field(..., description="High-level classification of the note.")
     context: str = Field(..., description="Situational or thematic context of the note.")
+    embedding_vector: List[float] = Field(..., description="Vector representation for semantic search and retrieval.")
     keywords: List[str] = Field(default_factory=list, description="List of keywords for retrieval and indexing.")
     links: Dict[str, str] = Field(default_factory=dict, description="Bidirectional links to related memory notes.")
     related_queries: List[str] = Field(
         default_factory=list, description="Similar or related queries linked to this note."
     )
-    embedding_vector: List[float] = Field(None, description="Vector representation for semantic search and retrieval.")
 
     # Spatial tracking
     access_count: int = Field(0, ge=0, description="Number of times this note has been retrieved.")
@@ -95,10 +95,9 @@ class Tape(BaseModel):
 class TapeDeck:
     """A memory management system for storing and retrieving Tape objects."""
 
-    def __init__(self, model, embed_func: Optional[Callable[[str], List[float]]] = None):
+    def __init__(self, model) -> None:
         self.tapes: Dict[str, Tape] = {}
         self.agent = Agent(model)
-        self.embed_func = embed_func  # to be replaced
 
     def add_tape(self, content: str, role: str) -> None:
         """
@@ -124,10 +123,9 @@ class TapeDeck:
             keywords=keywords,
             links=links,
             related_queries=related_queries,
+            embedding_vector=self.agent.embed(content),
         )
 
-        if self.embed_func and not tape.embedding_vector:
-            tape.embedding_vector = self.embed_func(tape.content)
         self.tapes[tape.id] = tape
         return tape
 
@@ -144,8 +142,7 @@ class TapeDeck:
         tape = self.get_tape(tape_id)
         if tape:
             tape.update_content(new_content)
-            if self.embed_func:
-                tape.embedding_vector = self.embed_func(new_content)
+            tape.embedding_vector = self.agent.embed(new_content)
 
     def delete_tape(self, tape_id: str) -> None:
         """Delete a Tape by ID."""
@@ -162,8 +159,8 @@ class TapeDeck:
 
     def retrieve_relevant(self, query: str, top_k: int = 5) -> List[Tape]:
         """Retrieve relevant Tapes using embeddings if available, otherwise keywords."""
-        if self.embed_func and any(t.embedding_vector for t in self.tapes.values()):
-            query_embedding = self.embed_func(query)
+        if any(t.embedding_vector for t in self.tapes.values()):
+            query_embedding = self.agent.embed(query)
             scores = {}
             for tape in self.tapes.values():
                 if tape.embedding_vector:
