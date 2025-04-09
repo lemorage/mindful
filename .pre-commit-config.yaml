@@ -45,7 +45,7 @@ repos:
       - id: mypy
         args: ["--strict", "--ignore-missing-imports", "--show-error-codes"]
         additional_dependencies: [tokenize-rt==3.2.0, pydantic>=2.11.1]  # pydantic MUST be included here to pass mypy
-        files: ^(mindful/|tests/)
+        exclude: ^(examples/|tests/)
         pass_filenames: true
 
   - repo: https://github.com/codespell-project/codespell
