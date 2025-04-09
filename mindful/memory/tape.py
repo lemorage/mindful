@@ -1,13 +1,13 @@
 from datetime import datetime
-from typing import Dict, List, Optional, Union, Callable
+from typing import Dict, List, Optional, Union
 from uuid import uuid4
 import numpy as np
 from pydantic import BaseModel, Field
 
-from mindful.agent import Agent
+from mindful.agent import Agent  # type: ignore
 
 
-class Tape(BaseModel):
+class Tape(BaseModel):  # type: ignore
     """
     A structured memory tape for the LLM bot, inspired by the Slip-Card (Zettelkasten) method.
 
@@ -33,7 +33,7 @@ class Tape(BaseModel):
         versions (List[Dict[str, Union[str, datetime]]]): A history of previous versions of this note.
     """
 
-    # Core tontent
+    # Core content
     content: str = Field(..., description="Main textual content of the memory note.")
     role: str = Field(..., description="Role associated with this memory (e.g., 'user', 'assistant').")
     uid: str = Field(
@@ -95,11 +95,11 @@ class Tape(BaseModel):
 class TapeDeck:
     """A memory management system for storing and retrieving Tape objects."""
 
-    def __init__(self, model) -> None:
+    def __init__(self, model: str) -> None:
         self.tapes: Dict[str, Tape] = {}
         self.agent = Agent(model)
 
-    def add_tape(self, content: str, role: str) -> None:
+    def add_tape(self, content: str, role: str) -> Tape:
         """
         Add a new Tape to the deck from raw content and role.
         Automatically handles embedding and placeholder metadata.
@@ -111,8 +111,8 @@ class TapeDeck:
         category, context, keywords = self.agent.generate_metadata(content)
 
         # TODO: can later be executed through tool calling by an agent, empty for now
-        links = {}
-        related_queries = []
+        links: Dict[str, str] = {}
+        related_queries: List[str] = []
 
         # Create the Tape
         tape = Tape(

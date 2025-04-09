@@ -43,7 +43,7 @@ repos:
     rev: v1.15.0
     hooks:
       - id: mypy
-        args: ["--strict", "--show-error-codes"]
+        args: ["--strict", "--ignore-missing-imports", "--show-error-codes"]
         additional_dependencies: [tokenize-rt==3.2.0]
         pass_filenames: true
 

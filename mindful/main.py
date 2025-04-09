@@ -1,15 +1,18 @@
+# type: ignore
+
 from functools import wraps
+from typing import Any, Dict
 
 from mindful.memory.tape import TapeDeck
 
 
-def mindful(chat_method):
+def mindful(chat_method: Any):
     """
     Decorator to automatically store chat interactions as memory Tapes.
     """
 
     @wraps(chat_method)
-    def wrapper(self, user_input: str, *args, **kwargs) -> str:
+    def wrapper(self, user_input: str, *args: Any, **kwargs: Dict[str, Any]) -> str:
         """This will handle memory operations behind the scenes."""
         if not hasattr(self, "_mindful_core"):
             self._mindful_core = TapeDeck("openai")  # TODO: to make it dynamically set

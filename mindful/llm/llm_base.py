@@ -8,14 +8,14 @@ class LLMBase(ABC):
     managing the request lifecycle, and parsing into a standard chat completions response format.
     """
 
-    def __init__(self, model: str, api_key: Optional[str] = None, **kwargs) -> None:
+    def __init__(self, model: str, api_key: Optional[str] = None, **kwargs: Dict[str, Any]) -> None:
         """
         Initialize the base LLM class.
 
         Args:
             model (str): The model name or ID to use.
             api_key (Optional[str]): API key for the provider.
-            kwargs: Additional configuration for the provider.
+            kwargs (Dict[str, Any]): Additional configuration for the provider.
         """
         self.model = model
         self.api_key = api_key
