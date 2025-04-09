@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from mindful.agent import Agent  # type: ignore
 
 
-class Tape(BaseModel):  # type: ignore
+class Tape(BaseModel):
     """
     A structured memory tape for the LLM bot, inspired by the Slip-Card (Zettelkasten) method.
 
