@@ -1,7 +1,5 @@
-# type: ignore
-
-from typing import Any, Dict, List, Optional
-import requests
+from typing import Any, Dict, List, Optional, cast
+import requests  # type: ignore[import-untyped]
 import json
 
 from mindful.llm.llm_base import LLMBase
@@ -37,7 +35,7 @@ class OpenAI(LLMBase):
             timeout=30,
         )
         response.raise_for_status()
-        return response.json()
+        return cast(Dict[str, Any], response.json())
 
     def parse_response(self, raw_response: Dict[str, Any]) -> Dict[str, Any]:
         """Parse OpenAI API response."""
@@ -62,4 +60,4 @@ class OpenAI(LLMBase):
             timeout=30,
         )
         response.raise_for_status()
-        return response.json()["data"][0]["embedding"]
+        return cast(List[float], response.json()["data"][0]["embedding"])
