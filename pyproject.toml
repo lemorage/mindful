@@ -36,8 +36,6 @@ markers = [
 testpaths = [
     "tests"
 ]
-maxfail = 3
-disable_warnings = true
 log_cli = true
 log_cli_level = "INFO"
 
