@@ -11,10 +11,14 @@ def chatbot():
 
 
 @patch("tests.utils.completion")
-def test_single_round_of_conversation(mock_completion, chatbot):
+@patch("mindful.agent.Agent.embed")
+@patch("mindful.agent.Agent.generate_metadata")
+def test_single_round_of_conversation(mock_generate_metadata, mock_embedding, mock_completion, chatbot):
     # Arrange
     user_input = "Hello, Assistant!"
     mock_response = "Hello! How can I assist you today?"
+    mock_generate_metadata.return_value = ("greeting", "general", ["hello", "assistant"])
+    mock_embedding.return_value = [0.7] * 768
     mock_completion.return_value = ModelResponse(
         id="chatcmpl-mock",
         created=1234567890,
@@ -50,12 +54,16 @@ def test_single_round_of_conversation(mock_completion, chatbot):
 
 
 @patch("tests.utils.completion")
-def test_multiple_rounds_of_conversation(mock_completion, chatbot):
+@patch("mindful.agent.Agent.embed")
+@patch("mindful.agent.Agent.generate_metadata")
+def test_multiple_rounds_of_conversation(mock_generate_metadata, mock_embedding, mock_completion, chatbot):
     # Arrange
     inputs_and_responses = [
         ("Hello, Assistant!", "Hello! How can I assist you today?"),
         ("What is the weather like today?", "I can't provide real-time weather info."),
     ]
+    mock_generate_metadata.return_value = ("greeting", "general", ["hello", "assistant"])
+    mock_embedding.return_value = [0.7] * 768
     mock_completion.side_effect = [
         ModelResponse(
             choices=[
@@ -91,10 +99,14 @@ def test_multiple_rounds_of_conversation(mock_completion, chatbot):
 
 
 @patch("tests.utils.completion")
-def test_linking_between_tapes(mock_completion, chatbot):
+@patch("mindful.agent.Agent.embed")
+@patch("mindful.agent.Agent.generate_metadata")
+def test_linking_between_tapes(mock_generate_metadata, mock_embedding, mock_completion, chatbot):
     # Arrange
     inputs = ["Hello, Assistant!", "What is the weather like today?"]
     responses = ["Hi there!", "I can't give live weather info."]
+    mock_generate_metadata.return_value = ("greeting", "general", ["hello", "assistant"])
+    mock_embedding.return_value = [0.7] * 768
     mock_completion.side_effect = [
         ModelResponse(
             choices=[
@@ -132,12 +144,16 @@ def test_linking_between_tapes(mock_completion, chatbot):
 
 
 @patch("tests.utils.completion")
-def test_persistence_of_memory(mock_completion, chatbot):
+@patch("mindful.agent.Agent.embed")
+@patch("mindful.agent.Agent.generate_metadata")
+def test_persistence_of_memory(mock_generate_metadata, mock_embedding, mock_completion, chatbot):
     # Arrange
     interactions = [
         ("Hello, Assistant!", "Hi there!"),
         ("What is the weather like today?", "I can't give live weather info."),
     ]
+    mock_generate_metadata.return_value = ("greeting", "general", ["hello", "assistant"])
+    mock_embedding.return_value = [0.7] * 768
     mock_completion.side_effect = [
         ModelResponse(
             choices=[
