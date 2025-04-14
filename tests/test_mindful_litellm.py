@@ -1,6 +1,12 @@
-import pytest
 from unittest.mock import patch
-from litellm import ModelResponse, Choices, Message
+
+from litellm import (
+    Choices,
+    Message,
+    ModelResponse,
+)
+import pytest
+
 from tests.utils import LiteLLMClient
 
 
@@ -17,7 +23,6 @@ def mock_agent_and_completion():
         patch("mindful.agent.Agent.embed") as mock_embedding,
         patch("tests.utils.completion") as mock_completion,
     ):
-
         mock_generate_metadata.return_value = ("greeting", "general", ["hello", "assistant"])
         mock_embedding.return_value = [0.7] * 768
 

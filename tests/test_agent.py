@@ -1,5 +1,10 @@
+from unittest.mock import (
+    MagicMock,
+    patch,
+)
+
 import pytest
-from unittest.mock import patch, MagicMock
+
 from mindful.agent import Agent
 
 EXPECTED_VECTOR_LENGTH = 768

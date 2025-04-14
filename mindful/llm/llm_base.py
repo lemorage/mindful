@@ -1,5 +1,15 @@
-from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union, Literal
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import (
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Union,
+)
 
 # Define a type alias for the message format for clarity
 ChatMessage = Dict[str, str]

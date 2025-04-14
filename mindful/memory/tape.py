@@ -1,10 +1,19 @@
 from datetime import datetime
-from typing import Dict, List, Optional, Union
+from typing import (
+    Dict,
+    List,
+    Optional,
+    Union,
+)
 from uuid import uuid4
-import numpy as np
-from pydantic import BaseModel, Field
 
-from mindful.agent import Agent  # type: ignore
+import numpy as np
+from pydantic import (
+    BaseModel,
+    Field,
+)
+
+from mindful.agent import Agent
 
 
 class Tape(BaseModel):

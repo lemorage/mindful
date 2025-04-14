@@ -1,8 +1,17 @@
 from functools import wraps
-from mindful.memory.tape import Tape, TapeDeck
 import inspect
+from typing import (
+    Any,
+    Callable,
+    ParamSpec,
+    TypeVar,
+    cast,
+)
 
-from typing import Callable, TypeVar, ParamSpec, Any, cast
+from mindful.memory.tape import (
+    Tape,
+    TapeDeck,
+)
 
 # Define TypeVar for the return type and ParamSpec for the parameters
 # Requires Python 3.10+ for ParamSpec

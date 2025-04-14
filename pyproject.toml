@@ -39,6 +39,12 @@ testpaths = [
 log_cli = true
 log_cli_level = "INFO"
 
+[tool.isort]
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 2
+use_parentheses = true
+
 [dependency-groups]
 dev = [
     "litellm>=1.65.3",

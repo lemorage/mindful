@@ -6,14 +6,12 @@ select = [
     "E",    # pycodestyle errors (PEP 8)
     "F",    # Pyflakes (logical errors, unused imports, etc.)
     "F401", # Explicitly include unused import check (Pyflakes)
-    "I",    # Enable import sorting
     "W",    # pycodestyle warnings
     "C90",  # Pylint conventions
     "N",    # Naming conventions
     "D",    # pydocstyle (docstring style enforcement)
     "Q",    # Flake8 Quotes (enforce consistent use of quotes)
     "PT",   # Pytoml (for TOML files)
-    "I001", # isort
     "ANN",  # Enforce type annotations
     "FBT",  # Boolean type checks (type consistency)
     "PLC",  # Pylint comments

@@ -1,9 +1,12 @@
 import json
+from typing import (
+    List,
+    Tuple,
+    cast,
+)
 
-from typing import List, Tuple, cast
-
-from mindful.utils import get_api_key
 from mindful.llm.openai import OpenAI
+from mindful.utils import get_api_key
 
 
 class Agent:

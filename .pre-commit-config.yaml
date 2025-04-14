@@ -68,8 +68,8 @@ repos:
       - id: uv-ruff-format
         name: uv-ruff-format
         description: let uv run ruff to sort imports and format code
-        entry: uv run ruff check --select I --fix && uv run ruff format
-        language: python
+        entry: bash -c "uv run isort . && uv run ruff check --select I --fix && uv run ruff format"
+        language: system
         pass_filenames: false
         files: ^(.*/)?(uv\.lock|pyproject\.toml)$
 

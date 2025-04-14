@@ -1,7 +1,7 @@
+from litellm import completion
+
 from mindful import mindful
 from mindful.utils import get_api_key
-
-from litellm import completion
 
 
 class LiteLLMClient:

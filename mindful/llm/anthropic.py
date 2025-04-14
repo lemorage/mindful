@@ -1,6 +1,15 @@
-from typing import Any, Dict, List, Optional, cast
-import requests  # type: ignore[import-untyped]
+# type: ignore
+
 import json
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    cast,
+)
+
+import requests  # type: ignore[import-untyped]
 
 from mindful.llm.llm_base import LLMBase
 
