@@ -65,6 +65,7 @@ ToolChoice = Union[
     Literal["auto"],  # Provider decides whether to call tools
     Literal["none"],  # Provider must not call tools
     Literal["required"],  # Provider must call one or more tools
+    Literal["any"],  # Provider must use one of the provided tools
     Dict[str, Dict[str, str]],  # Force a specific tool, e.g. {"type": "function", "function": {"name": "my_function"}}
 ]
 

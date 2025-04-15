@@ -1,5 +1,3 @@
-# type: ignore
-
 import json
 from typing import (
     Any,
@@ -11,7 +9,13 @@ from typing import (
 
 import requests  # type: ignore[import-untyped]
 
-from mindful.llm.llm_base import LLMBase
+from mindful.llm.llm_base import (
+    ChatMessage,
+    LLMBase,
+    ParsedResponse,
+    ToolChoice,
+    ToolDefinition,
+)
 
 
 class Anthropic(LLMBase):
@@ -19,51 +23,98 @@ class Anthropic(LLMBase):
 
     BASE_URL = "https://api.anthropic.com/v1"
 
-    def __init__(self, model: str, api_key: Optional[str] = None, **kwargs: Any) -> None:
+    def __init__(self, model: str, api_key: Optional[str] = None, **kwargs: Dict[str, Any]) -> None:
         super().__init__(model, api_key, **kwargs)
-        self.headers = {
-            "x-api-key": api_key,
-            "Content-Type": "application/json",
-            "anthropic-version": "2023-06-01",  # Latest stable version as per docs
-        }
 
-    def format_request(self, messages: List[Dict[str, str]], **kwargs: Any) -> Dict[str, Any]:
-        """Format the request payload for Anthropic messages endpoint."""
-        # Anthropic expects a single system message at the start if present
-        system_message = next((m["content"] for m in messages if m["role"] == "system"), None)
-        user_messages = [m for m in messages if m["role"] != "system"]
+    def format_request(
+        self,
+        messages: List[ChatMessage],
+        tools: Optional[List[ToolDefinition]] = None,
+        tool_choice: ToolChoice = None,
+        **kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        # Validate and adapt OpenAI-style ToolDefinition to Anthropic's format
+        adapted_tools: Optional[List[Dict[str, Any]]] = None
+        if tools:
+            adapted_tools = []
+            for t in tools:
+                name = t["function"]["name"]
+                if (
+                    not name
+                    or not isinstance(name, str)
+                    or len(name) > 64
+                    or not all(c.isalnum() or c in ["_", "-"] for c in name)
+                ):
+                    raise ValueError(f"Invalid tool name: {name}. Must match ^[a-zA-Z0-9_-]{{1,64}}$")
+                description = t["function"]["description"]
 
-        payload = {
+                adapted_tools.append(
+                    {"name": name, "description": description, "input_schema": t["function"]["parameters"]}
+                )
+
+        payload: Dict[str, Any] = {
             "model": self.model,
-            "messages": user_messages,
-            "max_tokens": 1024,  # Required parameter
+            "messages": messages,
+            "max_tokens": kwargs.get("max_tokens", 1024),
             **kwargs,
         }
-        if system_message:
-            payload["system"] = system_message
+
+        if adapted_tools:
+            payload["tools"] = adapted_tools
+            # Handle tool_choice per Anthropic's options: auto, any, tool, none
+            if tool_choice == "none":
+                payload.pop("tools")
+            elif tool_choice == "auto":
+                payload["tool_choice"] = {"type": "auto"}
+            elif tool_choice == "any":
+                payload["tool_choice"] = {"type": "any"}
+            elif tool_choice == "required":
+                # Map 'required' to Anthropic's 'any' (must use at least one tool)
+                payload["tool_choice"] = {"type": "any"}
+            elif isinstance(tool_choice, dict):
+                payload["tool_choice"] = {"type": "tool", "name": tool_choice["function"]["name"]}
+
+            # Support disabling parallel tool use
+            if kwargs.get("disable_parallel_tool_use", False):
+                payload["tool_choice"] = payload.get("tool_choice", {})
+                payload["tool_choice"]["disable_parallel_tool_use"] = True
+
         return payload
 
     def send_request(self, formatted_request: Dict[str, Any]) -> Dict[str, Any]:
-        """Send request to Anthropic messages endpoint."""
-        url = f"{self.BASE_URL}/messages"
-        response = requests.post(
-            url,
-            headers=self.headers,
-            data=json.dumps(formatted_request),
-            timeout=30,
-        )
+        headers = {"x-api-key": self.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
+        response = requests.post(f"{Anthropic.BASE_URL}/messages", headers=headers, json=formatted_request)
         response.raise_for_status()
         return cast(Dict[str, Any], response.json())
 
-    def parse_response(self, raw_response: Dict[str, Any]) -> Dict[str, Any]:
-        """Parse Anthropic API response."""
-        # Anthropic returns content as a list of content blocks
-        content = "".join(block["text"] for block in raw_response["content"] if block["type"] == "text")
-        return {
-            "role": raw_response["role"],
-            "content": content,
-        }
+    def parse_response(self, raw_response: Dict[str, Any]) -> ParsedResponse:
+        content: List[Dict[str, Any]] = raw_response.get("content", [])
+        stop_reason: Optional[str] = raw_response.get("stop_reason")
+        parsed: ParsedResponse = {"role": "assistant"}
+        text_content: List[str] = []
+        tool_calls: List[Dict[str, Any]] = []
 
-    def get_embedding(self, text: str, model: Optional[str] = None) -> List[float]:
-        """Anthropic doesn't provide embedding endpoint; raising NotImplementedError."""
-        raise NotImplementedError("Anthropic API does not support direct embedding generation")
+        for block in content:
+            if block["type"] == "text":
+                # Handle chain-of-thought or regular text
+                text_content.append(str(block["text"]))
+            elif block["type"] == "tool_use":
+                tool_calls.append(
+                    {
+                        "id": block["id"],
+                        "type": "function",
+                        "function": {"name": block["name"], "arguments": json.dumps(block["input"])},
+                    }
+                )
+
+        if text_content:
+            parsed["content"] = "\n".join(text_content)
+        if tool_calls:
+            parsed["tool_calls"] = tool_calls
+        if stop_reason:
+            parsed["stop_reason"] = stop_reason  # include for tool_use detection
+
+        return parsed
+
+    def get_embedding(self, text: str, embedding_model: Optional[str] = None) -> List[float]:
+        raise NotImplementedError("Anthropic does not provide an embedding endpoint as of now.")
