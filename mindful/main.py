@@ -3,6 +3,9 @@ import inspect
 from typing import (
     Any,
     Callable,
+    Dict,
+    List,
+    Optional,
     ParamSpec,
     TypeVar,
     cast,
@@ -41,58 +44,92 @@ def mindful(input: str) -> Callable[[Callable[P, R]], Callable[P, R]]:  # stick 
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
         @wraps(func)
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            """The wrapper function that executes around the original."""
+            # --- Step 1: Initial setup & get user input ---
             sig = inspect.signature(func)
-            bound_args = sig.bind(*args, **kwargs)
-            bound_args.apply_defaults()
+            try:
+                bound_args = sig.bind_partial(*args, **kwargs)
+                bound_args.apply_defaults()
+            except TypeError as e:
+                raise
 
             arguments = bound_args.arguments
             if not arguments:
                 raise ValueError("Mindful can't wrap a function with no arguments.")
             elif input not in arguments:
                 raise ValueError(f"Expected message input '{input}' not found in function signature.")
-            original_input = bound_args.arguments[input]
+            original_user_input = bound_args.arguments[input]
 
+            instance_self: Optional[Any] = None  # To hold the instance 'self'
             is_method = "self" in arguments
 
             tape_deck: TapeDeck
-
-            # Get or create TapeDeck
-            if is_method:
-                # 'self' here refers to the instance the method is bound to.
-                # Mypy might complain here too if the class definition doesn't
-                # hint at _mindful_core. Using Any or Protocols on the class
-                # side might be needed, or ignoring these lines as well.
-                instance_self: Any = arguments["self"]  # Use Any for now if class type is unknown
+            if is_method and instance_self is not None:
                 if not hasattr(instance_self, "_mindful_core"):
+                    # TODO: Example provider - could be configurable
                     instance_self._mindful_core = TapeDeck("openai")
                 tape_deck = instance_self._mindful_core
             else:
-                # Handle dynamically added attribute to the wrapper function object
+                # Handle standalone functions - attach TapeDeck to the wrapper itself
                 if not hasattr(wrapper, "_mindful_core"):
-                    # Tell mypy to ignore the dynamic attribute assignment
-                    setattr(wrapper, "_mindful_core", TapeDeck("openai"))  # Use setattr for clarity
-                    # Alternative:
-                    # wrapper._mindful_core = TapeDeck("openai") # type: ignore[attr-defined]
-                # Tell mypy to ignore the dynamic attribute access
-                tape_deck = getattr(wrapper, "_mindful_core")  # Use getattr for clarity
-                # Alternative:
-                # tape_deck = wrapper._mindful_core # type: ignore[attr-defined]
+                    setattr(wrapper, "_mindful_core", TapeDeck("openai"))
+                tape_deck = getattr(wrapper, "_mindful_core")
 
-            # Store user input
-            user_tape: Tape = tape_deck.add_tape(content=original_input, role="user")
+            # --- Step 2: Retrieve PAST memory tapes ---
+            retrieved_memory_messages: List[Dict[str, str]] = []
+            mindful_user_input: str
+            try:
+                memory_tapes = tape_deck.retrieve_relevant(original_user_input)
+                retrieved_memory_messages = [{"role": t.role, "content": t.content} for t in memory_tapes]
+                mindful_memory: Optional[str]
+                if not retrieved_memory_messages:
+                    mindful_memory = "None"
+                else:
+                    user_contents = [msg["content"] for msg in retrieved_memory_messages if msg["role"] == "user"]
+                    mindful_memory = "\n".join(user_contents) if user_contents else "None"
 
-            # Call original function
-            response = func(*args, **kwargs)
+                mindful_user_input = original_user_input + "<MEMORY>" + mindful_memory + "</MEMORY>"
+            except Exception as e:
+                print(f"Failed to retrieve memory tapes: {e}")
+                mindful_user_input = "<MEMORY>Err</MEMORY>"
+                # TODO: should give warnings
 
-            # Store assistant response
-            assistant_tape: Tape = tape_deck.add_tape(content=cast(str, response), role="assistant")
+            # --- Step 3: Store User Input Tape ---
+            try:
+                user_tape: Optional[Tape] = tape_deck.add_tape(content=original_user_input, role="user")
+            except Exception as e:
+                # TODO: should give warnings
+                user_tape = None  # Mark as failed
 
-            if hasattr(user_tape, "id") and hasattr(assistant_tape, "id"):
-                tape_deck.link_tapes(user_tape.id, assistant_tape.id, "response_to")
-            else:
-                print("Warning: Could not link tapes, ID attribute missing.")
+            # --- Step 4: Call Original User Function ---
+            response: R
+            try:
+                # Call the user's original function with modified messages
+                bound_args.arguments[input] = mindful_user_input
+                response = func(*bound_args.args, **bound_args.kwargs)
+            except Exception as e:
+                raise e
 
-            return response
+            # --- Step 5: Store Assistant Response & Link ---
+            try:
+                # Assuming response is string-like or can be cast
+                assistant_content = cast(str, response)
+                assistant_tape: Optional[Tape] = tape_deck.add_tape(content=assistant_content, role="assistant")
+            except Exception as e:
+                assistant_tape = None  # Mark as failed
+
+            # Link user input tape to assistant response tape if both were stored
+            if user_tape is not None and assistant_tape is not None:
+                try:
+                    # Check if IDs exist (they should if tapes were created)
+                    if hasattr(user_tape, "id") and hasattr(assistant_tape, "id"):
+                        tape_deck.link_tapes(user_tape.id, assistant_tape.id, "response_to")
+                    else:
+                        print("Could not link tapes: ID attribute missing.")
+                except Exception as e:
+                    print(f"Failed to link tapes ({user_tape.id} -> {assistant_tape.id}): {e}")
+
+            return response  # Return the original function's response
 
         return wrapper
 
