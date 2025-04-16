@@ -1,4 +1,5 @@
 from unittest.mock import (
+    ANY,
     MagicMock,
     patch,
 )
@@ -103,7 +104,7 @@ def test_agent_embed_with_mocked_provider_returns_fixed_vector(mock_openai_agent
     assert isinstance(result, list), "Result should be a list"
     assert len(result) == EXPECTED_VECTOR_LENGTH, f"Vector length should be {EXPECTED_VECTOR_LENGTH}"
     assert all(isinstance(x, float) and x == STATIC_VALUE for x in result), "All elements should be floats equal to 0.1"
-    mock_provider.get_embedding.assert_called_once_with(test_input)
+    mock_provider.get_embedding.assert_called_once_with(text=test_input, embedding_model=ANY)
 
 
 @pytest.mark.unit
@@ -118,4 +119,4 @@ def test_agent_embed_handles_various_inputs(mock_openai_agent, content):
     # Assert
     assert isinstance(result, list)
     assert len(result) == EXPECTED_VECTOR_LENGTH
-    mock_provider.get_embedding.assert_called_once_with(content)
+    mock_provider.get_embedding.assert_called_once_with(text=content, embedding_model=ANY)
