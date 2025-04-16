@@ -45,3 +45,19 @@ def test_multiple_interactions_stored_and_linked(client):
 
         assert user_tape and assistant_tape
         assert assistant_tape.id in user_tape.links or user_tape.id in assistant_tape.links
+
+
+def test_memory_is_isolated_across_instances():
+    client1 = LiteLLMClient(model="gpt-3.5-turbo")
+    client1.chat("Hello!")
+    client1.chat("How are you?")
+
+    client2 = LiteLLMClient(model="gpt-3.5-turbo")
+
+    assert not hasattr(client2, "_mindful_core")
+
+    client2.chat("What time is it?")
+
+    assert hasattr(client2, "_mindful_core")
+    assert len(client2._mindful_core.tapes) == 2  # user + assistant
+    assert all("Hello" not in t.content for t in client2._mindful_core.tapes.values())
