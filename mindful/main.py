@@ -24,11 +24,7 @@ LOG_FORMAT = "%(levelname)-8s %(name)s:%(module)s:%(lineno)d - %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 logger = logging.getLogger("mindful")
 
-# Note: To see DEBUG messages emitted by the decorator when debug=True,
-# the user might need to configure their application's logging level
-# for the 'mindful' logger to DEBUG, e.g.:
-# logging.getLogger('mindful').setLevel(logging.DEBUG)
-
+_mindful_logger_initialized = False  # Only set this once per process
 
 # Define TypeVar for the return type and ParamSpec for the parameters
 # Requires Python 3.10+ for ParamSpec
@@ -51,6 +47,13 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
     Returns:
         Callable[[Callable[P, R]], Callable[P, R]]: The configured decorator.
     """
+    global _mindful_logger_initialized
+    if debug and not _mindful_logger_initialized:
+        logging.getLogger("mindful").setLevel(logging.DEBUG)
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            logger.addHandler(handler)
+        _mindful_logger_initialized = True
 
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
         """
