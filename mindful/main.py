@@ -1,7 +1,9 @@
+import ast
 from functools import wraps
 import inspect
 import logging
 from logging import LogRecord
+import re
 import time
 from typing import (
     Any,
@@ -35,27 +37,52 @@ class MindfulLogFormatter(logging.Formatter):
         logging.INFO: "\033[32m",  # Green
         logging.WARNING: "\033[33m",  # Yellow
         logging.ERROR: "\033[31m",  # Red
-        logging.CRITICAL: "\033[1;41m",  # White on Red background
+        logging.CRITICAL: "\033[1;41m",  # Bold white on red background
     }
 
     RESET = "\033[0m"
     BOLD = "\033[1m"
     DIM = "\033[2m"
     TIMESTAMP_COLOR = "\033[90m"  # Gray
+    LABEL_COLOR = "\033[2m"
+    VALUE_COLOR = "\033[96m"  # Bright Cyan
 
     def format(self, record: LogRecord) -> str:
         level_color = self.COLOR_MAP.get(record.levelno, self.RESET)
-
         timestamp = time.strftime("%H:%M:%S")
+
         timestamp_str = f"{self.TIMESTAMP_COLOR}{timestamp}{self.RESET}"
+        levelname_str = f"{level_color}{record.levelname:<4}{self.RESET}"
+        logger_name = f"{self.BOLD}{record.name:<8}{self.RESET}"
+        location_str = f"{self.DIM}{record.module}:{record.lineno:<4}{self.RESET}"
 
-        levelname = f"{level_color}{record.levelname:<4}{self.RESET}"
-        logger_name = f"{self.BOLD}{record.name}{self.RESET}"
-        location = f"{self.DIM}{record.module}:{record.lineno}{self.RESET}"
+        raw_message = super().format(record)
+        message = self._colorize_message(raw_message, level_color)
 
-        message = super().format(record)
+        return f"{timestamp_str} {levelname_str} {logger_name} {location_str} - {message}"
 
-        return f"{timestamp_str} {levelname} {logger_name:<8} {location:<12} - {message}"
+    def _colorize_message(self, msg: str, fallback_color: str) -> str:
+        """
+        Applies separate coloring to message label and value if it looks like 'Label: Value'.
+        Falls back to level-based color otherwise.
+        """
+        # Match "Label: {dict_string}"
+        match = re.match(r"^(.+?):\s({.+})$", msg)
+        if match:
+            label, dict_str = match.groups()
+            try:
+                parsed_dict = ast.literal_eval(dict_str)  # Safe parse
+                if isinstance(parsed_dict, dict):
+                    pretty_lines = [f"{self.LABEL_COLOR}{label}:{self.RESET}"]
+                    for k, v in parsed_dict.items():
+                        pretty_lines.append(f"  {self.BOLD}{k:<6}{self.RESET} → {self.VALUE_COLOR}{v}{self.RESET}")
+                    return "\n".join(pretty_lines)
+            except Exception:
+                # Fallback to basic color if parsing fails
+                pass
+
+        # Default fallback color
+        return f"{fallback_color}{msg}{self.RESET}"
 
 
 def mindful_log_formatter() -> logging.Formatter:
