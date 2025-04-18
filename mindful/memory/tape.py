@@ -104,9 +104,9 @@ class Tape(BaseModel):
 class TapeDeck:
     """A memory management system for storing and retrieving Tape objects."""
 
-    def __init__(self, model: str) -> None:
+    def __init__(self, provider_name: str) -> None:
         self.tapes: Dict[str, Tape] = {}
-        self.agent = Agent(model)
+        self.agent = Agent(provider_name)
 
     def add_tape(self, content: str, role: str) -> Tape:
         """

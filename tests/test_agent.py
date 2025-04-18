@@ -26,7 +26,7 @@ def mock_openai_agent():
     mock_provider.get_embedding.return_value = [STATIC_VALUE] * EXPECTED_VECTOR_LENGTH
     with patch("mindful.utils.get_api_key", return_value="fake-key"):
         with patch("mindful.agent.OpenAI", return_value=mock_provider):
-            agent = Agent(model="gpt-4")
+            agent = Agent("openai")
     return agent, mock_provider
 
 
