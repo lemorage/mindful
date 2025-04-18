@@ -155,6 +155,8 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
 
             instance_self: Optional[Any] = None  # To hold the instance 'self'
             is_method = "self" in arguments
+            if is_method:
+                instance_self = arguments["self"]
 
             tape_deck: TapeDeck
             if is_method and instance_self is not None:
