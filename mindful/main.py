@@ -1,6 +1,8 @@
 from functools import wraps
 import inspect
 import logging
+from logging import LogRecord
+import time
 from typing import (
     Any,
     Callable,
@@ -18,18 +20,46 @@ from mindful.memory.tape import (
 )
 
 # --- Logging Setup ---
-# Configure logging for warnings and debug info from the decorator
-# Enhanced format: Level (padded), Logger Name, Module:LineNo - Message
-LOG_FORMAT = "%(levelname)-8s %(name)s:%(module)s:%(lineno)d - %(message)s"
-logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
-logger = logging.getLogger("mindful")
-
+_mindful_logger = logging.getLogger("Mindful")
 _mindful_logger_initialized = False  # Only set this once per process
 
 # Define TypeVar for the return type and ParamSpec for the parameters
 # Requires Python 3.10+ for ParamSpec
 R = TypeVar("R")
 P = ParamSpec("P")
+
+
+class MindfulLogFormatter(logging.Formatter):
+    COLOR_MAP = {
+        logging.DEBUG: "\033[36m",  # Cyan
+        logging.INFO: "\033[32m",  # Green
+        logging.WARNING: "\033[33m",  # Yellow
+        logging.ERROR: "\033[31m",  # Red
+        logging.CRITICAL: "\033[1;41m",  # White on Red background
+    }
+
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    TIMESTAMP_COLOR = "\033[90m"  # Gray
+
+    def format(self, record: LogRecord) -> str:
+        level_color = self.COLOR_MAP.get(record.levelno, self.RESET)
+
+        timestamp = time.strftime("%H:%M:%S")
+        timestamp_str = f"{self.TIMESTAMP_COLOR}{timestamp}{self.RESET}"
+
+        levelname = f"{level_color}{record.levelname:<4}{self.RESET}"
+        logger_name = f"{self.BOLD}{record.name}{self.RESET}"
+        location = f"{self.DIM}{record.module}:{record.lineno}{self.RESET}"
+
+        message = super().format(record)
+
+        return f"{timestamp_str} {levelname} {logger_name:<8} {location:<12} - {message}"
+
+
+def mindful_log_formatter() -> logging.Formatter:
+    return MindfulLogFormatter("%(message)s")
 
 
 def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Callable[P, R]]:
@@ -49,10 +79,11 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
     """
     global _mindful_logger_initialized
     if debug and not _mindful_logger_initialized:
-        logging.getLogger("mindful").setLevel(logging.DEBUG)
-        if not logger.handlers:
+        _mindful_logger.setLevel(logging.DEBUG)
+        if not _mindful_logger.handlers:
             handler = logging.StreamHandler()
-            logger.addHandler(handler)
+            handler.setFormatter(mindful_log_formatter())
+            _mindful_logger.addHandler(handler)
         _mindful_logger_initialized = True
 
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
@@ -75,7 +106,7 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             """The wrapper function that executes around the original."""
             if debug:
-                logger.debug(f"Entering mindful wrapper for {func.__name__}")
+                _mindful_logger.debug(f"Entering mindful wrapper for {func.__name__}")
             # --- Step 1: Initial setup & get user input ---
             sig = inspect.signature(func)
             try:
@@ -83,9 +114,9 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
                 bound_args.apply_defaults()
                 if debug:
                     arg_reprs = {k: repr(v) for k, v in bound_args.arguments.items()}
-                    logger.debug(f"Arguments bound: {arg_reprs}")
+                    _mindful_logger.debug(f"Arguments bound: {arg_reprs}")
             except TypeError as e:
-                logger.error(f"Failed to bind arguments for {func.__name__}: {e}")
+                _mindful_logger.error(f"Failed to bind arguments for {func.__name__}: {e}")
                 raise
 
             arguments = bound_args.arguments
@@ -111,58 +142,66 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
                 tape_deck = getattr(wrapper, "_mindful_core")
 
             if debug and original_user_input:
-                logger.debug(f"Identified user input string: '{original_user_input[:50]}...'")  # Log truncated input
+                _mindful_logger.debug(
+                    f"Identified user input string: '{original_user_input[:50]}...'"
+                )  # Log truncated input
 
             if debug and tape_deck:
-                logger.debug(f"Using TapeDeck instance: {tape_deck!r} (id: {id(tape_deck)})")
+                _mindful_logger.debug(f"Using TapeDeck instance: {tape_deck!r} (id: {id(tape_deck)})")
 
             # --- Step 2: Retrieve PAST memory tapes ---
             retrieved_memory_messages: List[Dict[str, str]] = []
             mindful_user_input: str
             if debug:
-                logger.debug(f"Attempting to retrieve relevant memory for query: '{original_user_input[:50]}...'")
+                _mindful_logger.debug(
+                    f"Attempting to retrieve relevant memory for query: '{original_user_input[:50]}...'"
+                )
             try:
                 memory_tapes = tape_deck.retrieve_relevant(original_user_input)
                 retrieved_memory_messages = [{"role": t.role, "content": t.content} for t in memory_tapes]
-                logger.info(f"Retrieved {len(retrieved_memory_messages)} messages from history.")
-                mindful_memory: Optional[str]
-                if not retrieved_memory_messages:
-                    mindful_memory = "None"
-                else:
-                    user_contents = [msg["content"] for msg in retrieved_memory_messages if msg["role"] == "user"]
-                    mindful_memory = "\n".join(user_contents) if user_contents else "None"
+                _mindful_logger.info(f"Retrieved {len(retrieved_memory_messages)} messages from history.")
 
-                mindful_user_input = original_user_input + "<MEMORY>" + mindful_memory + "</MEMORY>"
-                if debug and mindful_user_input:
-                    logger.debug(f"  - Mindful user input is {mindful_user_input}...'")
+                if retrieved_memory_messages:
+                    memory_log = "\n".join(
+                        f"{msg['role'].capitalize()}: {msg['content']}" for msg in retrieved_memory_messages
+                    )
+                    mindful_user_input = f"<CONTEXT>\n{memory_log}\n</CONTEXT>\nUser: {original_user_input}"
+                else:
+                    mindful_user_input = f"User: {original_user_input}"
+
+                if debug:
+                    _mindful_logger.debug(f"  - Mindful user input: {mindful_user_input}...")
             except Exception as e:
-                logger.error(f"Failed to retrieve memory tapes: {e}", exc_info=debug)  # Add traceback if debug
-                mindful_user_input = "<MEMORY>Err</MEMORY>"
-                # TODO: should give warnings
+                _mindful_logger.error(f"Failed to retrieve memory tapes: {e}", exc_info=debug)
+                mindful_user_input = "User: " + original_user_input + "\n<CONTEXT>No Context Found...</CONTEXT>"
 
             # --- Step 3: Store User Input Tape ---
             user_tape: Optional[Tape] = None
             if debug:
-                logger.debug(f"Attempting to store user input tape: role=user, content='{original_user_input[:50]}...'")
+                _mindful_logger.debug(
+                    f"Attempting to store user input tape: role=user, content='{original_user_input[:50]}...'"
+                )
             try:
                 user_tape = tape_deck.add_tape(content=original_user_input, role="user")
                 if debug and user_tape:
-                    logger.debug(f"Stored user tape successfully: id={user_tape.id}")
+                    _mindful_logger.debug(f"Stored user tape successfully: id={user_tape.id}")
             except Exception as e:
-                logger.error(f"Failed to store user input tape: {e}", exc_info=debug)
+                _mindful_logger.error(f"Failed to store user input tape: {e}", exc_info=debug)
 
             # --- Step 4: Call Original User Function ---
             response: R
             try:
                 # Call the user's original function with modified messages
                 if debug:
-                    logger.debug(f"Calling original function: {func.__name__}")
+                    _mindful_logger.debug(f"Calling original function: {func.__name__}")
                 bound_args.arguments[input] = mindful_user_input
                 response = func(*bound_args.args, **bound_args.kwargs)
                 if debug:
-                    logger.debug(f"Original function {func.__name__} execution finished.")
+                    _mindful_logger.debug(f"Original function {func.__name__} execution finished.")
             except Exception as e:
-                logger.error(f"Error during execution of decorated function {func.__name__}: {e}", exc_info=debug)
+                _mindful_logger.error(
+                    f"Error during execution of decorated function {func.__name__}: {e}", exc_info=debug
+                )
                 raise e
 
             # --- Step 5: Store Assistant Response & Link ---
@@ -170,33 +209,37 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
             try:
                 assistant_content = cast(str, response)
                 if debug:
-                    logger.debug(
+                    _mindful_logger.debug(
                         f"Attempting to store assistant response tape: role=assistant, content='{assistant_content[:50]}...'"
                     )
                 assistant_tape = tape_deck.add_tape(content=assistant_content, role="assistant")
                 if debug and assistant_tape:
-                    logger.debug(f"Stored assistant tape successfully: id={assistant_tape.id}")
+                    _mindful_logger.debug(f"Stored assistant tape successfully: id={assistant_tape.id}")
             except Exception as e:
-                logger.error(f"Failed to store assistant response tape: {e}", exc_info=debug)
+                _mindful_logger.error(f"Failed to store assistant response tape: {e}", exc_info=debug)
 
             # Link user input tape to assistant response tape if both were stored
             if user_tape is not None and assistant_tape is not None:
                 if debug:
-                    logger.debug(f"Attempting to link tapes: user_id={user_tape.id}, assistant_id={assistant_tape.id}")
+                    _mindful_logger.debug(
+                        f"Attempting to link tapes: user_id={user_tape.id}, assistant_id={assistant_tape.id}"
+                    )
                 try:
                     if hasattr(user_tape, "id") and hasattr(assistant_tape, "id"):
                         tape_deck.link_tapes(user_tape.id, assistant_tape.id, "response_to")
                         if debug:
-                            logger.debug("Tapes linked successfully.")
+                            _mindful_logger.debug("Tapes linked successfully.")
                     else:
-                        logger.warning("Could not link tapes: ID attribute missing.")
+                        _mindful_logger.warning("Could not link tapes: ID attribute missing.")
                 except Exception as e:
-                    logger.error(f"Failed to link tapes ({user_tape.id} -> {assistant_tape.id}): {e}", exc_info=debug)
+                    _mindful_logger.error(
+                        f"Failed to link tapes ({user_tape.id} -> {assistant_tape.id}): {e}", exc_info=debug
+                    )
             elif debug:
-                logger.debug("Skipping tape linking as user or assistant tape is missing.")
+                _mindful_logger.debug("Skipping tape linking as user or assistant tape is missing.")
 
             if debug:
-                logger.debug(f"Exiting mindful wrapper for {func.__name__}.")
+                _mindful_logger.debug(f"Exiting mindful wrapper for {func.__name__}.")
             return response  # Return the original function's response
 
         return wrapper
