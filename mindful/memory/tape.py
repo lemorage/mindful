@@ -13,7 +13,7 @@ from pydantic import (
     Field,
 )
 
-from mindful.agent import Agent
+from mindful.agent import MindfulAgent as Agent
 
 
 class Tape(BaseModel):
@@ -118,6 +118,8 @@ class TapeDeck:
         """
         # Stub/default metadata
         category, context, keywords = self.agent.generate_metadata(content)
+        category, context = (category or ""), (context or "")
+        embedding_vector = self.agent.embed(content) or []
 
         # TODO: can later be executed through tool calling by an agent, empty for now
         links: Dict[str, str] = {}
@@ -132,7 +134,7 @@ class TapeDeck:
             keywords=keywords,
             links=links,
             related_queries=related_queries,
-            embedding_vector=self.agent.embed(content),
+            embedding_vector=embedding_vector,
         )
 
         self.tapes[tape.id] = tape
@@ -151,7 +153,7 @@ class TapeDeck:
         tape = self.get_tape(tape_id)
         if tape:
             tape.update_content(new_content)
-            tape.embedding_vector = self.agent.embed(new_content)
+            tape.embedding_vector = self.agent.embed(new_content) or []
 
     def delete_tape(self, tape_id: str) -> None:
         """Delete a Tape by ID."""
