@@ -44,8 +44,11 @@ class MindfulLogFormatter(logging.Formatter):
     BOLD = "\033[1m"
     DIM = "\033[2m"
     TIMESTAMP_COLOR = "\033[90m"  # Gray
-    LABEL_COLOR = "\033[2m"
+    LABEL_COLOR = "\033[2m"  # Dim
     VALUE_COLOR = "\033[96m"  # Bright Cyan
+    STRING_COLOR = "\033[38;5;183m"  # Light Purple
+    NUMBER_COLOR = "\033[38;5;208m"  # Orange
+    BOOL_NONE_COLOR = "\033[95m"  # Magenta
 
     def format(self, record: LogRecord) -> str:
         level_color = self.COLOR_MAP.get(record.levelno, self.RESET)
@@ -56,37 +59,82 @@ class MindfulLogFormatter(logging.Formatter):
         logger_name = f"{self.BOLD}{record.name:<8}{self.RESET}"
         location_str = f"{self.DIM}{record.module}:{record.lineno:<4}{self.RESET}"
 
-        raw_message = super().format(record)
+        record.message = record.getMessage()
+        raw_message = self.formatMessage(record)
         message = self._colorize_message(raw_message, level_color)
 
-        return f"{timestamp_str} {levelname_str} {logger_name} {location_str} - {message}"
+        # Combine parts - handle potential multi-line messages from colorize correctly
+        first_line, *rest_lines = message.split("\n", 1)
+        formatted_message = f"{timestamp_str} {levelname_str} {logger_name} {location_str} - {first_line}"
+        if rest_lines:
+            padding = " " * (len(timestamp) + 1 + 4 + 1 + 8 + 1 + len(f"{record.module}:{record.lineno:<4}") + 3)
+            formatted_message += "\n" + "\n".join(padding + line for line in rest_lines[0].splitlines())
+        return formatted_message
 
     def _colorize_message(self, msg: str, fallback_color: str) -> str:
         """
-        Applies separate coloring to message label and value if it looks like 'Label: Value'.
-        Falls back to level-based color otherwise.
+        Applies beautified formatting to messages of the form 'Label: Value' for any Value type.
+        Falls back to level-based color for other messages.
         """
-        # Match "Label: {dict_string}"
-        match = re.match(r"^(.+?):\s({.+})$", msg)
-        if match:
-            label, dict_str = match.groups()
-            try:
-                parsed_dict = ast.literal_eval(dict_str)  # Safe parse
-                if isinstance(parsed_dict, dict):
-                    pretty_lines = [f"{self.LABEL_COLOR}{label}:{self.RESET}"]
-                    for k, v in parsed_dict.items():
-                        pretty_lines.append(f"  {self.BOLD}{k:<6}{self.RESET} → {self.VALUE_COLOR}{v}{self.RESET}")
-                    return "\n".join(pretty_lines)
-            except Exception:
-                # Fallback to basic color if parsing fails
-                pass
+        # Match "Label: Value"
+        match = re.match(r"^(.+?):\s(.+)$", msg, re.DOTALL)
+        if not match:
+            return f"{fallback_color}{msg}{self.RESET}"
 
-        # Default fallback color
-        return f"{fallback_color}{msg}{self.RESET}"
+        label, value_str = match.groups()
+        try:
+            # Safely parse Value into a Python literal
+            parsed_value = ast.literal_eval(value_str.strip())
+            return self._format_value(label, parsed_value)
+        except (ValueError, SyntaxError):
+            # If parsing fails, treat as raw string
+            return self._format_value(label, value_str.strip())
 
+    def _format_value(self, label: str, value: Any) -> str:
+        """
+        Formats the value based on its type, with consistent indentation and coloring.
+        """
+        lines = [f"{self.LABEL_COLOR}{label}:{self.RESET}"]
 
-def mindful_log_formatter() -> logging.Formatter:
-    return MindfulLogFormatter("%(message)s")
+        def format_item(item: Any, indent: int = 2) -> list[str]:
+            """Helper to format a single item based on its type."""
+            indent_str = " " * indent
+            if isinstance(item, dict):
+                sub_lines = []
+                for k, v in item.items():
+                    sub_lines.append(f"{indent_str}{self.BOLD}{k:<6}{self.RESET} → {self._format_single_value(v)}")
+                return sub_lines
+            elif isinstance(item, (list, tuple)):
+                sub_lines = []
+                for i, v in enumerate(item):
+                    sub_lines.append(f"{indent_str}{i:<2} → {self._format_single_value(v)}")
+                return sub_lines
+            else:
+                return [f"{indent_str}{self._format_single_value(item)}"]
+
+        # Format the top-level value
+        if isinstance(value, (dict, list, tuple)):
+            lines.extend(format_item(value))
+        else:
+            lines.append(f"  {self._format_single_value(value)}")
+
+        return "\n".join(lines)
+
+    def _format_single_value(self, value: Any) -> str:
+        """
+        Formats a single value based on its type.
+        """
+        if isinstance(value, str):
+            return f"{self.STRING_COLOR}{repr(value)}{self.RESET}"
+        elif isinstance(value, (int, float)):
+            return f"{self.NUMBER_COLOR}{value}{self.RESET}"
+        elif isinstance(value, bool) or value is None:
+            return f"{self.BOOL_NONE_COLOR}{value}{self.RESET}"
+        elif isinstance(value, (list, tuple, dict)):
+            # Nested structures are handled by format_item
+            return "\n".join(self._format_value("Nested", value).splitlines()[1:])
+        else:
+            return f"{self.VALUE_COLOR}{value}{self.RESET}"
 
 
 def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Callable[P, R]]:
@@ -105,13 +153,16 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
         Callable[[Callable[P, R]], Callable[P, R]]: The configured decorator.
     """
     global _mindful_logger_initialized
-    if debug and not _mindful_logger_initialized:
-        _mindful_logger.setLevel(logging.DEBUG)
+    if not _mindful_logger_initialized:
+        # Setup handler only once per process, respect debug flag for level
+        log_level = logging.DEBUG if debug else logging.INFO
+        _mindful_logger.setLevel(log_level)
         if not _mindful_logger.handlers:
             handler = logging.StreamHandler()
-            handler.setFormatter(mindful_log_formatter())
+            handler.setFormatter(MindfulLogFormatter("%(message)s"))
             _mindful_logger.addHandler(handler)
         _mindful_logger_initialized = True
+        _mindful_logger.info(f"Mindful logger initialized with level {logging.getLevelName(log_level)}")
 
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
         """
