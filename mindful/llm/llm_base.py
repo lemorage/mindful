@@ -8,6 +8,7 @@ from typing import (
     List,
     Literal,
     Optional,
+    TypedDict,
     Union,
 )
 
@@ -59,6 +60,15 @@ ParsedResponse = Dict[str, Any]
 # }
 
 
+class ToolFunctionCall(TypedDict):
+    name: str
+
+
+class ForcedToolChoice(TypedDict):
+    type: Literal["function"]
+    function: ToolFunctionCall
+
+
 # Define ToolChoice type (OpenAI function calling schema)
 ToolChoice = Union[
     None,  # Provider decides (often 'auto')
@@ -66,9 +76,7 @@ ToolChoice = Union[
     Literal["none"],  # Provider must not call tools
     Literal["required"],  # Provider must call one or more tools
     Literal["any"],  # Provider must use one of the provided tools
-    Dict[
-        str, Union[str, Dict[str, str]]
-    ],  # Force a specific tool, e.g. {"type": "function", "function": {"name": "my_function"}}
+    ForcedToolChoice,  # Force a specific tool, e.g. {"type": "function", "function": {"name": "my_function"}}
 ]
 
 
