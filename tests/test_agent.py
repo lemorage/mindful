@@ -116,7 +116,7 @@ def test_generate_metadata_success(mock_openai_agent, mock_successful_tool_call_
     assert isinstance(call_kwargs["messages"], list)
     assert isinstance(call_kwargs["tools"], list)
     assert call_kwargs["tools"][0]["function"]["name"] == TapeMetadata.__name__
-    assert call_kwargs["tool_choice"] == {"type": "function", "function": {"name": TapeMetadata.__name__}}
+    assert call_kwargs["tool_choice"] == {"name": TapeMetadata.__name__}
 
 
 @pytest.mark.unit

@@ -107,7 +107,7 @@ Content:
         messages: List[ChatMessage] = [{"role": "user", "content": prompt}]
 
         # 3. Define Tool Choice
-        tool_choice: ToolChoice = {"type": "function", "function": {"name": metadata_tool_name}}
+        tool_choice: ToolChoice = {"name": metadata_tool_name}
 
         # 4. Call LLM using provider's complete_chat
         parsed_response: Optional[ParsedResponse] = None
@@ -146,8 +146,7 @@ Content:
 
         arguments_str = metadata_call.get("function", {}).get("arguments", "{}")
         try:
-            extracted_data = json.loads(arguments_str)
-            metadata = TapeMetadata.model_validate(extracted_data)
+            metadata = TapeMetadata.model_validate_json(arguments_str)
             logger.info(f"Metadata generated: Category='{metadata.category}', Keywords={len(metadata.keywords)}")
             return (
                 str(metadata.category) if metadata.category else None,
