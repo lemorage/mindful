@@ -1,8 +1,12 @@
-from datetime import datetime
+from datetime import datetime, timezone
+import math
+import logging
 from typing import (
+    Any,
     Dict,
     List,
     Optional,
+    Tuple,
     Union,
 )
 from uuid import uuid4
@@ -13,33 +17,34 @@ from pydantic import (
     Field,
 )
 
-from mindful.agent import MindfulAgent as Agent
+from mindful.agent import MindfulAgent
+from mindful.models import TapeMetadata
+
+logger = logging.getLogger("mindful")
 
 
 class Tape(BaseModel):
     """
     A structured memory tape for the LLM bot, inspired by the Slip-Card (Zettelkasten) method.
 
-    This class represents an atomic unit of knowledge in the bot's memory system, allowing
-    intelligent retrieval, dynamic linking, and evolutionary tracking of stored information.
+    This model represents an atomic unit of long-term memory, encapsulating knowledge that can
+    be intelligently retrieved, contextually linked, and semantically evolved over time.
 
     Attributes:
         content (str): The main textual information stored in this memory note.
         role (str): The role associated with this memory (e.g., 'user', 'assistant').
-        uid (str): A structured unique identifier based on a timestamp (YYYYMMDDHHMMSS format).
-        id (str): A globally unique identifier (UUID) for the note.
-        category (str): A broad classification label for grouping similar notes.
-        context (str): The situational or thematic context in which this memory is relevant.
-        keywords (List[str]): A list of keywords for efficient indexing and retrieval.
-        links (Dict[str, str]): A dictionary of related memory notes (bidirectional linking).
-        related_queries (List[str]): A record of user queries that led to the creation of this note.
-        embedding_vector (List[float]): A numerical vector representation for semantic retrieval.
-        access_count (int): A counter tracking how often this note has been accessed.
-        priority (int): A score (1-10) representing the importance of this note.
-        created_at (datetime): The timestamp when this note was originally created.
-        updated_at (datetime): The timestamp when this note was last modified.
-        last_accessed (datetime): The timestamp when this note was last retrieved.
-        versions (List[Dict[str, Union[str, datetime]]]): A history of previous versions of this note.
+        uid (str): A structured time-based identifier (YYYYMMDDHHMMSS format) for chronological sorting.
+        id (str): A globally unique identifier (UUID) for the note instance.
+        metadata (TapeMetadata): Encapsulated semantic metadata, including category, context, and keywords.
+        embedding_vector (List[float]): A dense vector representation used for semantic search and retrieval.
+        access_count (int): Tracks how many times this note has been accessed or retrieved.
+        priority (int): Importance ranking from 1 (low) to 10 (critical).
+        links (Dict[str, str]): Bidirectional links to other memory notes (e.g., related ideas, references).
+        related_queries (List[str]): User queries or prompts that resulted in the creation of this note.
+        created_at (datetime): Timestamp when the note was originally created.
+        updated_at (datetime): Timestamp when the note was last updated.
+        last_accessed (datetime): Timestamp of the most recent access.
+        versions (List[Dict[str, Union[str, datetime]]]): Historical snapshots of previous versions of this note.
     """
 
     # Core content
@@ -51,18 +56,16 @@ class Tape(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()), description="Universally unique identifier for the note.")
 
     # Dynamic metadata (handled by mindful agent)
-    category: str = Field(..., description="High-level classification of the note.")
-    context: str = Field(..., description="Situational or thematic context of the note.")
+    metadata: TapeMetadata
     embedding_vector: List[float] = Field(..., description="Vector representation for semantic search and retrieval.")
-    keywords: List[str] = Field(default_factory=list, description="List of keywords for retrieval and indexing.")
-    links: Dict[str, str] = Field(default_factory=dict, description="Bidirectional links to related memory notes.")
-    related_queries: List[str] = Field(
-        default_factory=list, description="Similar or related queries linked to this note."
-    )
 
     # Spatial tracking
     access_count: int = Field(0, ge=0, description="Number of times this note has been retrieved.")
     priority: int = Field(1, ge=1, le=10, description="Priority level (1-10) for importance ranking.")
+    links: Dict[str, str] = Field(default_factory=dict, description="Bidirectional links to related memory notes.")
+    related_queries: List[str] = Field(
+        default_factory=list, description="Similar or related queries linked to this note."
+    )
 
     # Temporal tracking
     created_at: datetime = Field(default_factory=datetime.now, description="Timestamp when the note was created.")
@@ -106,7 +109,7 @@ class TapeDeck:
 
     def __init__(self, provider_name: str) -> None:
         self.tapes: Dict[str, Tape] = {}
-        self.agent = Agent(provider_name)
+        self.agent = MindfulAgent(provider_name)
 
     def add_tape(self, content: str, role: str) -> Tape:
         """
@@ -129,9 +132,7 @@ class TapeDeck:
         tape = Tape(
             content=content,
             role=role,
-            category=category,
-            context=context,
-            keywords=keywords,
+            metadata=TapeMetadata(category=category, context=context, keywords=keywords),
             links=links,
             related_queries=related_queries,
             embedding_vector=embedding_vector,
@@ -190,7 +191,7 @@ class TapeDeck:
             keywords = set(query.lower().split())
             scores = {}
             for tape in self.tapes.values():
-                tape_keywords = set(tape.keywords)
+                tape_keywords = set(tape.metadata.keywords)
                 score = len(keywords.intersection(tape_keywords))
                 if score > 0:
                     weighted_score = score * (1 + (tape.priority - 1) * 0.05)
