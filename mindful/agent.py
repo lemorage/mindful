@@ -6,7 +6,7 @@ from mindful.llm.llm_base import LLMBase, ChatMessage, ToolDefinition, ParsedRes
 from mindful.llm.openai import OpenAI
 from mindful.llm.anthropic import Anthropic
 from mindful.utils import get_api_key
-from mindful.models import TapeMetadata
+from mindful.models import TapeMetadata, pydantic_to_openai_tool
 
 logger = logging.getLogger("Mindful")
 
@@ -87,7 +87,9 @@ class MindfulAgent:
 
         # 1. Define the Tool based on the Pydantic model
         try:
-            metadata_tool_def: ToolDefinition = {"type": "function", "function": TapeMetadata.model_json_schema()}
+            metadata_tool_def: ToolDefinition = pydantic_to_openai_tool(
+                TapeMetadata, "TapeMetadata", "Extract metadata (category, context, keywords)."
+            )
             metadata_tool_name = TapeMetadata.__name__
             metadata_tool_def["function"]["name"] = metadata_tool_name
         except Exception as e:
@@ -174,7 +176,6 @@ Content:
             logger.warning(f"No embedding model configured for provider {type(self.provider).__name__}. Cannot embed.")
             return None
 
-        # Check if the provider instance implements get_embedding
         if not callable(getattr(self.provider, "get_embedding", None)):
             logger.error(f"Provider {type(self.provider).__name__} does not implement 'get_embedding'.")
             return None

@@ -1,5 +1,9 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Type
+from mindful.llm.llm_base import ToolDefinition
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class TapeMetadata(BaseModel):
@@ -8,3 +12,29 @@ class TapeMetadata(BaseModel):
     category: str = Field(..., description="A single, broad classification category for the content.")
     context: str = Field(..., description="Concise situational or thematic context (max ~2-3 sentences).")
     keywords: List[str] = Field(default_factory=list, description="A list of 2-5 relevant keywords.")
+
+
+def pydantic_to_openai_tool(model: Type[BaseModel], name: str, description: str) -> ToolDefinition:
+    """
+    Convert a Pydantic model to an OpenAI function tool definition.
+    """
+    try:
+        schema = model.model_json_schema()
+    except Exception as e:
+        logger.error(f"Failed to generate schema for {model.__name__}: {e}")
+        raise ValueError(f"Invalid schema for {model.__name__}")
+
+    tool_def = {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": schema["properties"],
+                "required": schema.get("required", []),
+            },
+        },
+    }
+
+    return tool_def
