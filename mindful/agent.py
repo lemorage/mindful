@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, Callable, List, Tuple, cast, Optional, Dict
+from typing import Callable, List, Tuple, Optional
 
 from mindful.llm.llm_base import LLMBase, ChatMessage, ToolDefinition, ParsedResponse, ToolChoice
 from mindful.llm.openai import OpenAI
@@ -8,7 +8,7 @@ from mindful.llm.anthropic import Anthropic
 from mindful.utils import get_api_key
 from mindful.models import TapeMetadata, pydantic_to_openai_tool
 
-logger = logging.getLogger("Mindful")
+logger = logging.getLogger("mindful")
 
 
 class MindfulAgent:
@@ -149,7 +149,7 @@ Content:
         arguments_str = metadata_call.get("function", {}).get("arguments", "{}")
         try:
             metadata = TapeMetadata.model_validate_json(arguments_str)
-            logger.info(f"Metadata generated: Category='{metadata.category}', Keywords={len(metadata.keywords)}")
+            logger.info(f"Metadata generated: Category='{metadata.category}', Keywords={metadata.keywords}")
             return (
                 str(metadata.category) if metadata.category else None,
                 str(metadata.context) if metadata.context else None,
