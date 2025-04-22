@@ -1,12 +1,26 @@
 import json
 import logging
-from typing import Callable, List, Tuple, Optional
+from typing import (
+    Callable,
+    List,
+    Optional,
+    Tuple,
+)
 
-from mindful.llm.llm_base import LLMBase, ChatMessage, ToolDefinition, ParsedResponse, ToolChoice
-from mindful.llm.openai import OpenAI
 from mindful.llm.anthropic import Anthropic
+from mindful.llm.llm_base import (
+    ChatMessage,
+    LLMBase,
+    ParsedResponse,
+    ToolChoice,
+    ToolDefinition,
+)
+from mindful.llm.openai import OpenAI
+from mindful.models import (
+    TapeMetadata,
+    pydantic_to_openai_tool,
+)
 from mindful.utils import get_api_key
-from mindful.models import TapeMetadata, pydantic_to_openai_tool
 
 logger = logging.getLogger("mindful")
 
@@ -109,7 +123,7 @@ Content:
         messages: List[ChatMessage] = [{"role": "user", "content": prompt}]
 
         # 3. Define Tool Choice
-        tool_choice: ToolChoice = {"name": metadata_tool_name}
+        tool_choice: ToolChoice = {"type": "function", "function": {"name": metadata_tool_name}}
 
         # 4. Call LLM using provider's complete_chat
         parsed_response: Optional[ParsedResponse] = None

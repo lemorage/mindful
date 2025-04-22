@@ -1,6 +1,17 @@
 from __future__ import annotations  # allows forward refs
-from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
+
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+)
 
 if TYPE_CHECKING:
     from mindful.memory.tape import Tape  # Only for type hints
