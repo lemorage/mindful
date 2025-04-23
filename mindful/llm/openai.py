@@ -36,9 +36,7 @@ class OpenAI(LLMBase):
         if tools:
             payload["tools"] = tools
             if tool_choice:
-                payload["tool_choice"] = (
-                    tool_choice if isinstance(tool_choice, str) else {"type": "function", "function": tool_choice}
-                )
+                payload["tool_choice"] = tool_choice
             else:
                 payload["tool_choice"] = "auto"
         return payload
