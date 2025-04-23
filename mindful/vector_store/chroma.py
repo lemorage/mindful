@@ -71,7 +71,7 @@ def _chroma_result_to_tape(
     metadatas: List[Optional[Dict[str, Any]]],
     documents: List[Optional[str]],
     distances: Optional[List[float]] = None,  # Only from query
-    embeddings: Optional[List[List[float]]] = None,  # Only from get with include=['embeddings']
+    embeddings: Optional[List[Optional[List[float]]]] = None,  # Only from get with include=['embeddings']
 ) -> List[Optional[Tape]]:
     """Converts Chroma query/get results back to Tape objects."""
     tapes: List[Optional[Tape]] = []
@@ -82,6 +82,9 @@ def _chroma_result_to_tape(
         meta = metadatas[i] if metadatas and i < len(metadatas) else {}
         doc = documents[i] if documents and i < len(documents) else None
         embedding = embeddings[i] if embeddings and i < len(embeddings) else None
+        logger.debug(
+            f"Processing embedding for tape {tape_id}, type: {type(embedding).__name__}, sample: {embedding[:5] if isinstance(embedding, list) else embedding}"
+        )
 
         if doc is None or meta is None:
             logger.warning(f"Missing document or metadata for Chroma ID {tape_id}. Cannot reconstruct Tape.")
@@ -104,8 +107,8 @@ def _chroma_result_to_tape(
                     else:
                         logger.warning(f"Expected string for {key} in tape {tape_id}, got {type(value).__name__}")
                         tape_data[key] = None  # or handle differently
-                elif key in ["keywords", "links", "related_queries", "versions"]:
-                    # Handle JSON-serialized fields
+                elif key in ["keywords", "links", "related_queries", "versions", "metadata"]:
+                    # Deserialize JSON strings
                     if isinstance(value, str):
                         try:
                             tape_data[key] = json.loads(value)
@@ -128,6 +131,9 @@ def _chroma_result_to_tape(
                     tape_data[field] = None  # TODO: set a default datetime, e.g., datetime.now()
             # Example: tape_data.setdefault("role", "unknown") for other fields
 
+            logger.debug(
+                f"tape_data for {tape_id} before validation: id={tape_data['id']}, metadata_type={type(tape_data.get('metadata'))}, metadata_sample={tape_data.get('metadata')}, embedding_vector_type={type(tape_data['embedding_vector'])}"
+            )
             tapes.append(Tape.model_validate(tape_data))
 
         except Exception as e:
@@ -329,29 +335,45 @@ class ChromaAdapter(StorageAdapter):
         if not tape_ids:
             return []
         try:
+            import numpy as np
+
             results = self.collection.get(ids=tape_ids, include=["metadatas", "documents", "embeddings"])
+
+            # Convert embeddings to lists
+            converted_embeddings: List[Optional[List[float]]] = []
+            for emb in results.get("embeddings", []):
+                if emb is None:
+                    converted_embeddings.append(None)
+                elif isinstance(emb, np.ndarray):
+                    converted_embeddings.append(emb.tolist())
+                    logger.debug(f"Converted NumPy array to list for embedding, length: {len(emb)}")
+                elif isinstance(emb, (list, tuple)):
+                    converted_embeddings.append(list(emb))
+                    logger.debug(f"Embedding is already a list/tuple, length: {len(emb)}")
+                else:
+                    logger.warning(f"Unexpected embedding type: {type(emb).__name__}")
+                    converted_embeddings.append(None)
+
             # Convert results, preserving order and handling missing items
             result_map = {res_id: i for i, res_id in enumerate(results["ids"])}  # map ID to index in results
-            tapes_map = {
-                res_id: tape
-                for res_id, tape in zip(
-                    results["ids"],
-                    _chroma_result_to_tape(
-                        ids=results["ids"],
-                        metadatas=results["metadatas"],
-                        documents=results["documents"],
-                        embeddings=results["embeddings"],
-                    ),
-                )
-            }
 
-            final_tapes = []
+            tapes = _chroma_result_to_tape(
+                ids=results["ids"],
+                metadatas=results["metadatas"],
+                documents=results["documents"],
+                embeddings=converted_embeddings,
+            )
+
+            tapes_map = {res_id: tape for res_id, tape in zip(results["ids"], tapes) if tape is not None}
+
+            final_tapes: List[Optional[Tape]] = []
             for tid in tape_ids:
                 if tid in tapes_map:
                     final_tapes.append(tapes_map[tid])
                 else:
                     final_tapes.append(None)
                     logger.debug(f"Tape {tid} not found in Chroma during batch get.")
+            logger.debug(f"Retrieved {sum(1 for t in final_tapes if t is not None)}/{len(tape_ids)} tapes from Chroma.")
             return final_tapes
 
         except Exception as e:
