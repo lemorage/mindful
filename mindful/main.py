@@ -1,9 +1,15 @@
+import os
+import atexit
+import importlib
+import ast
 from functools import wraps
 import inspect
 import logging
 import sys
 import threading
+import time
 from typing import (
+    Any,
     Callable,
     Dict,
     List,
@@ -13,10 +19,12 @@ from typing import (
     cast,
 )
 
+from mindful.agent import MindfulAgent
 from mindful.memory.tape import (
     Tape,
     TapeDeck,
 )
+from mindful.vector_store.storage import StorageAdapter
 from mindful.utils import MindfulLogFormatter
 
 logger = logging.getLogger("mindful")
@@ -37,10 +45,8 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
     Factory for the `mindful` decorator. Configures the user input source
     and logging behavior for the 'mindful' package namespace.
 
-    If debug=True, sets the 'mindful' logger level to DEBUG. If no handlers
-    are configured for the 'mindful' logger by the application, a default
-    StreamHandler using MindfulLogFormatter is added to ensure debug
-    output is visible with consistent formatting.
+    Initializes backend components (storage, agent, tapedeck) implicitly on first use,
+    defaulting to ChromaDB storage if not otherwise configured via environment variables.
 
     Args:
         input (str): The parameter name holding user input in the decorated function.
@@ -92,25 +98,16 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
             Callable[P, R]: The decorated function or method on user end.
         """
         wrapper_logger = logging.getLogger("mindful")
+        deck_init_lock = threading.Lock()
 
         @wraps(func)
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             """The wrapper function that executes around the original."""
-            # Check the debug flag passed to the factory to control emission
-            if debug:
-                wrapper_logger.debug(f"Entering mindful wrapper for {func.__name__}")
-
             # --- Step 1: Initial setup & get user input ---
             sig = inspect.signature(func)
             try:
                 bound_args = sig.bind_partial(*args, **kwargs)
                 bound_args.apply_defaults()
-                if debug:
-                    arg_reprs = {
-                        k: repr(v)[:100] + ("..." if len(repr(v)) > 100 else "")
-                        for k, v in bound_args.arguments.items()
-                    }
-                    wrapper_logger.debug(f"Arguments bound: {arg_reprs}")
             except TypeError as e:
                 wrapper_logger.error(f"Failed to bind arguments for {func.__name__}: {e}")
                 raise
@@ -130,57 +127,139 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
                 wrapper_logger.debug(f"User input (from '{input}'): '{str(original_user_input)[:100]}...'")
 
             # --- Step 2: Initialize TapeDeck for state management ---
-            def get_tape_deck() -> TapeDeck:
-                """Helper to initialize or retrieve TapeDeck for methods or functions."""
-                is_method = "self" in arguments
-                if is_method:
-                    self_instance = arguments["self"]
-                    if not hasattr(self_instance, "_mindful_core"):
-                        if debug:
-                            wrapper_logger.debug(f"Creating TapeDeck for instance {id(self_instance)}")
-                        # TODO: Replace with full TapeDeck initialization when ready
-                        self_instance._mindful_core = TapeDeck("openai")  # Placeholder
-                    return cast(TapeDeck, self_instance._mindful_core)
+            tape_deck: TapeDeck
+            instance_or_wrapper: Any = None
+            is_method = "self" in arguments
+            if is_method:
+                instance_or_wrapper = arguments["self"]
+            else:
+                instance_or_wrapper = wrapper
 
-                # Standalone function
-                if not hasattr(wrapper, "_mindful_core"):
-                    if debug:
-                        wrapper_logger.debug(f"Creating TapeDeck for function {func.__name__}")
-                    # TODO: Replace with full TapeDeck initialization when ready
-                    setattr(wrapper, "_mindful_core", TapeDeck("openai"))  # Placeholder
-                return cast(TapeDeck, getattr(wrapper, "_mindful_core"))
+            core_attr_name = "_mindful_core"
 
-            tape_deck = get_tape_deck()
-            if debug:
-                wrapper_logger.debug(f"Using TapeDeck instance: {tape_deck!r} (id: {id(tape_deck)})")
+            if not hasattr(instance_or_wrapper, core_attr_name):
+                with deck_init_lock:  # ensure thread-safe initialization per instance/function
+                    if not hasattr(instance_or_wrapper, core_attr_name):
+                        wrapper_logger.info(
+                            f"Initializing Mindful components (TapeDeck, Storage, Agent) for '{func.__name__}'..."
+                        )
+                        try:
+                            # --- 1. Read Config (Defaults Chroma) ---
+                            storage_type = os.environ.get("MINDFUL_STORAGE_TYPE", "chroma").lower()
+                            storage_config: Dict[str, Any] = {}
+                            agent_config: Dict[str, Any] = {}
 
-            # --- Step 2: Retrieve PAST memory tapes ---
-            retrieved_memory_messages: List[Dict[str, str]] = []
-            mindful_user_input: str
-            if debug:
-                wrapper_logger.debug(f"Attempting retrieval for query: '{str(original_user_input)[:100]}...'")
+                            # Default Chroma config
+                            if storage_type == "chroma":
+                                storage_config = {
+                                    "path": os.environ.get("MINDFUL_CHROMA_PATH", f"./mindful_db_{func.__name__}"),
+                                    "collection_name": os.environ.get(
+                                        "MINDFUL_CHROMA_COLLECTION", f"tapes_{func.__name__}"
+                                    ),
+                                }
+                            # Add elif blocks for qdrant, pinecone based on env vars
+                            elif storage_type == "qdrant":
+                                storage_config = {
+                                    "url": os.environ.get("MINDFUL_QDRANT_URL", "http://localhost:6333"),
+                                    "collection_name": os.environ.get(
+                                        "MINDFUL_QDRANT_COLLECTION", f"tapes_{func.__name__}"
+                                    ),
+                                    "api_key": os.environ.get("MINDFUL_QDRANT_API_KEY"),
+                                }
+                            # Add more storage types...
+                            else:
+                                raise ValueError(f"Unsupported storage type: {storage_type}")
+
+                            # Agent config (using non-DI MindfulAgent)
+                            agent_provider = os.environ.get("MINDFUL_PROVIDER", "openai")
+                            agent_init_kwargs = {"provider_name": agent_provider}
+                            # Add logic to pass model overrides from env vars if needed
+
+                            # TODO: Determine vector_size robustly! Critical config.
+                            # Needs input from Agent config or dedicated env var.
+                            vector_size = int(os.environ.get("MINDFUL_VECTOR_SIZE", 3072))  # example default
+                            storage_config["vector_size"] = vector_size
+                            wrapper_logger.debug(f"Using vector size: {vector_size}")
+
+                            # --- 2. Instantiate Components ---
+                            wrapper_logger.debug(
+                                f"Attempting init: Storage={storage_type}, AgentProvider={agent_provider}"
+                            )
+                            adapter: StorageAdapter
+                            if storage_type == "chroma":
+                                try:
+                                    from mindful.vector_store.chroma import ChromaAdapter
+
+                                    adapter = ChromaAdapter()
+                                except ImportError:
+                                    raise ImportError(
+                                        "ChromaDB adapter selected but `pip install mindful[chroma]` needed."
+                                    )
+                            elif storage_type == "qdrant":
+                                try:
+                                    # from mindful.vector_store.qdrant import QdrantAdapter
+
+                                    # adapter = QdrantAdapter()
+                                    pass
+                                except ImportError:
+                                    raise ImportError(
+                                        "Qdrant adapter selected but `pip install mindful[qdrant]` needed."
+                                    )
+                            # Add other types...
+                            else:
+                                raise RuntimeError("Invalid storage type survived check")
+
+                            adapter.initialize(storage_config)
+                            wrapper_logger.debug(f"Storage adapter '{storage_type}' initialized.")
+
+                            agent = MindfulAgent(**agent_init_kwargs)
+                            wrapper_logger.debug(f"MindfulAgent initialized for provider '{agent_provider}'.")
+
+                            # Instantiate the *refactored* TapeDeck, injecting dependencies
+                            initialized_deck = TapeDeck(vector_store=adapter, agent=agent)
+                            wrapper_logger.debug("TapeDeck initialized.")
+
+                            # --- Store the Initialized TapeDeck ---
+                            setattr(instance_or_wrapper, core_attr_name, initialized_deck)
+                            wrapper_logger.info(f"Mindful components initialized successfully for '{func.__name__}'.")
+
+                            # TODO: Need evolutions?
+
+                        except Exception as e:
+                            wrapper_logger.exception(f"CRITICAL ERROR during Mindful initialization.", exc_info=e)
+                            # Don't set the attribute if init failed
+                            raise RuntimeError(f"Mindful initialization failed: {e}") from e
+
             try:
-                memory_tapes = tape_deck.retrieve_relevant(str(original_user_input))
-                retrieved_memory_messages = [{"role": t.role, "content": t.content} for t in memory_tapes]
-                wrapper_logger.info(f"Retrieved {len(retrieved_memory_messages)} messages from history.")
+                # Retrieve the initialized TapeDeck stored in _mindful_core
+                tape_deck = getattr(instance_or_wrapper, core_attr_name)
+                if not isinstance(tape_deck, TapeDeck) or not hasattr(tape_deck, "storage"):
+                    # This indicates a problem if hasattr was true but it's not the right object
+                    raise TypeError("Attribute _mindful_core is not a properly initialized TapeDeck.")
+            except AttributeError:
+                # This should ideally not happen if init logic is correct, but handle defensively
+                wrapper_logger.error(
+                    f"Mindful TapeDeck not found for '{func.__name__}'. Initialization may have failed on first call."
+                )
+                raise RuntimeError("Mindful TapeDeck instance could not be retrieved.")
 
-                if retrieved_memory_messages:
-                    memory_log = "\n".join(
-                        f"{msg['role'].capitalize()}: {msg['content']}" for msg in retrieved_memory_messages
-                    )
-                    mindful_user_input = f"<CONTEXT>\n{memory_log}\n</CONTEXT>\nUser: {original_user_input}"
-                else:
-                    mindful_user_input = f"User: {original_user_input}"
+            if debug:
+                # Log the TapeDeck instance being used *after* initialization/retrieval
+                wrapper_logger.debug(f"Using initialized TapeDeck: {tape_deck!r} (id: {id(tape_deck)})")
 
-                if debug:
-                    wrapper_logger.debug(
-                        f"Prepared mindful_user_input (len {len(mindful_user_input)}): '{mindful_user_input[:150]}...'"
-                    )
+            # --- Step 3: Retrieve PAST memory tapes ---
+            retrieved_memory_messages: List[Dict[str, str]] = []
+            if debug:
+                wrapper_logger.debug(
+                    f"Attempting retrieval via TapeDeck for query: '{str(original_user_input)[:100]}...'"
+                )
+            try:
+                relevant_tapes = tape_deck.retrieve_relevant(str(original_user_input))
+                retrieved_memory_messages = [{"role": t.role, "content": t.content} for t in relevant_tapes]
             except Exception as e:
-                wrapper_logger.error(f"Failed to retrieve memory tapes: {e}", exc_info=debug)
-                mindful_user_input = "User: " + str(original_user_input) + "\n<CONTEXT>No Context Found...</CONTEXT>"
+                wrapper_logger.error(f"Failed to retrieve memory tapes via TapeDeck: {e}", exc_info=debug)
 
-            # --- Step 3: Store User Input Tape ---
+            # --- Step 4: Store User Input Tape ---
             user_tape: Optional[Tape] = None
             if debug:
                 wrapper_logger.debug(
@@ -193,7 +272,18 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
             except Exception as e:
                 wrapper_logger.error(f"Failed to store user input tape: {e}", exc_info=debug)
 
-            # --- Step 4: Call Original User Function ---
+            # --- Step 5: Prepare Input & Call Original Function ---
+            mindful_user_input: str
+            if retrieved_memory_messages:
+                memory_log = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in retrieved_memory_messages)
+                mindful_user_input = f"<CONTEXT>\n{memory_log}\n</CONTEXT>\nUser: {original_user_input}"
+            else:
+                mindful_user_input = f"User: {original_user_input}"
+            if debug:
+                wrapper_logger.debug(
+                    f"Prepared mindful_user_input (len {len(mindful_user_input)}): '{mindful_user_input[:150]}...'"
+                )
+
             response: R
             try:
                 # Call the user's original function with modified messages
@@ -211,7 +301,7 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
                 )
                 raise e
 
-            # --- Step 5: Store Assistant Response & Link ---
+            # --- Step 6: Store Assistant Response & Link ---
             assistant_tape: Optional[Tape] = None
             try:
                 assistant_content = cast(str, response)
@@ -237,12 +327,18 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
                             f"Attempting to link tapes: user_id={user_tape_id}, assistant_id={assistant_tape_id}"
                         )
                     try:
-                        tape_deck.link_tapes(user_tape_id, assistant_tape_id, "response_to")
-                        if debug:
-                            wrapper_logger.debug("Tapes linked successfully.")
+                        link_successful = tape_deck.link_tapes(user_tape_id, assistant_tape_id, "response_to")
+                        if link_successful:
+                            if debug:
+                                wrapper_logger.debug("Tapes linked successfully via TapeDeck.")
+                        else:
+                            if debug:
+                                wrapper_logger.debug("TapeDeck reported link failure (check previous logs).")
+
                     except Exception as e:
                         wrapper_logger.error(
-                            f"Failed to link tapes ({user_tape_id} -> {assistant_tape_id}): {e}", exc_info=debug
+                            f"Exception during tape linking call ({user_tape_id} -> {assistant_tape_id}): {e}",
+                            exc_info=debug,
                         )
                 elif debug:
                     wrapper_logger.warning("Could not link tapes: ID attribute missing on user or assistant tape.")
