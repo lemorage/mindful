@@ -1,8 +1,18 @@
-from typing import Optional, Dict, Any, Literal
-from pydantic import BaseModel, Field
+from typing import (
+    Any,
+    Dict,
+    Literal,
+    Optional,
+)
+
+from pydantic import (
+    Field,
+    model_validator,
+)
+from pydantic_settings import BaseSettings
 
 
-class MindfulConfig(BaseModel):
+class MindfulConfig(BaseSettings):   # type: ignore
     """
     Configuration object for the Mindful decorator.
 
@@ -31,11 +41,13 @@ class MindfulConfig(BaseModel):
         default=None, description="API key for Qdrant Cloud (optional). Env: MINDFUL_QDRANT_API_KEY"
     )
     qdrant_collection_name: Optional[str] = Field(
-        default=None, description="Collection name for Qdrant. Env: MINDFUL_QDRANT_COLLECTION"
+        default=None,
+        alias="QDRANT_COLLECTION",
+        description="Collection name for Qdrant. Env: MINDFUL_QDRANT_COLLECTION",
     )
 
     # Pinecone Specific
-    pinecone_api_key: Optional[str] = Field(default=None, description="API key for Pinecone. Env: PINECONE_API_KEY")
+    pinecone_api_key: Optional[str] = Field(default=None, description="Pinecone API key. Env: PINECONE_API_KEY")
     pinecone_index_name: Optional[str] = Field(
         default=None, description="Index name for Pinecone. Env: MINDFUL_PINECONE_INDEX"
     )
@@ -50,9 +62,25 @@ class MindfulConfig(BaseModel):
     # agent_embedding_model: Optional[str] = Field(default=None, ...)
 
     class Config:
-        validate_assignment = True
+        env_prefix = "MINDFUL_"
+        extra = "ignore"  # ignore unexpected env vars
 
-    # Helper to get specific storage config dict based on resolved type
+    @model_validator(mode="after")
+    def validate_storage_requirements(self) -> "MindfulConfig":
+        """Ensure required fields are present based on the selected storage type."""
+        if self.storage_type == "pinecone":
+            if not self.pinecone_api_key:
+                raise ValueError("Pinecone requires 'pinecone_api_key'.")
+            if not self.pinecone_index_name:
+                raise ValueError("Pinecone requires 'pinecone_index_name'.")
+        elif self.storage_type == "qdrant":
+            if not self.qdrant_collection_name:
+                raise ValueError("Qdrant requires 'qdrant_collection_name'.")
+        elif self.storage_type == "chroma":
+            if not self.vector_size:
+                raise ValueError("Chroma requires 'vector_size'.")
+        return self
+
     def get_storage_config(self, resolved_storage_type: str, func_name: str) -> Dict[str, Any]:
         config: Dict[str, Any] = {"vector_size": self.vector_size}  # vector size needed by all potentially
         if resolved_storage_type == "chroma":
@@ -65,7 +93,7 @@ class MindfulConfig(BaseModel):
         elif resolved_storage_type == "pinecone":
             config["api_key"] = self.pinecone_api_key
             config["index_name"] = (
-                self.pinecone_index_name or f"tapes-{func_name.lower().replace('_','')}"
+                self.pinecone_index_name or f"tapes-{func_name.lower().replace('_', '')}"
             )  # example default
             if not config["api_key"] or not config["index_name"]:
                 raise ValueError("Pinecone config requires 'pinecone_api_key' and 'pinecone_index_name'.")

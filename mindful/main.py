@@ -1,10 +1,10 @@
-import os
-import atexit
-import importlib
 import ast
+import atexit
 from functools import wraps
+import importlib
 import inspect
 import logging
+import os
 import sys
 import threading
 import time
@@ -25,8 +25,8 @@ from mindful.memory.tape import (
     Tape,
     TapeDeck,
 )
-from mindful.vector_store.storage import StorageAdapter
 from mindful.utils import MindfulLogFormatter
+from mindful.vector_store.storage import StorageAdapter
 
 logger = logging.getLogger("mindful")
 
@@ -149,37 +149,17 @@ def mindful(
                         )
                         try:
                             # --- 1. Resolve Configuration (Config Obj -> Env -> Default) ---
-                            # Create a temporary config instance from the passed object or default
-                            effective_config = config if config is not None else MindfulConfig()
+                            effective_config = config or MindfulConfig()
                             wrapper_logger.debug(f"Using config object provided: {config is not None}")
 
-                            # Resolve Storage Type
-                            storage_type = effective_config.storage_type
-                            if storage_type is None:
-                                storage_type = os.environ.get("MINDFUL_STORAGE_TYPE")  # type: ignore
-                            if storage_type is None:
-                                storage_type = "chroma"  # default
-                            storage_type = storage_type.lower()  # type: ignore
+                            # Let BaseSettings resolve from env; fallback defaults handled here
+                            storage_type = (effective_config.storage_type or "chroma").lower()
+                            agent_provider = (effective_config.agent_provider or "openai").lower()
+                            vector_size = effective_config.vector_size or 1536
+
                             wrapper_logger.debug(f"Resolved storage_type: '{storage_type}'")
-
-                            # Resolve Agent Provider
-                            agent_provider = effective_config.agent_provider
-                            if agent_provider is None:
-                                agent_provider = os.environ.get("MINDFUL_PROVIDER")  # type: ignore
-                            if agent_provider is None:
-                                agent_provider = "openai"  # default
-                            agent_provider = agent_provider.lower()  # type: ignore
                             wrapper_logger.debug(f"Resolved agent_provider: '{agent_provider}'")
-
-                            # Resolve Vector Size (Crucial!) - Config > Env > Default(Needs work)
-                            vector_size = effective_config.vector_size
-                            if vector_size is None:
-                                vs_env = os.environ.get("MINDFUL_VECTOR_SIZE")
-                                if vs_env:
-                                    vector_size = int(vs_env)
-                            if vector_size is None:
-                                # TODO: Need a better default or way to infer this!
-                                vector_size = 1536  # placeholder default
+                            if effective_config.vector_size is None:
                                 wrapper_logger.warning(
                                     f"Vector size not specified, defaulting to {vector_size}. Ensure this matches your embedding model!"
                                 )
@@ -187,29 +167,13 @@ def mindful(
                             # --- Create specific config dicts using resolved values ---
                             storage_config: Dict[str, Any] = {"vector_size": vector_size}
                             if storage_type == "chroma":
-                                path = (
-                                    effective_config.chroma_path
-                                    or os.environ.get("MINDFUL_CHROMA_PATH")
-                                    or f"./mindful_db_{func.__name__}"
-                                )
-                                coll = (
-                                    effective_config.chroma_collection_name
-                                    or os.environ.get("MINDFUL_CHROMA_COLLECTION")
-                                    or f"tapes_{func.__name__}"
-                                )
+                                path = effective_config.chroma_path or f"./mindful_db_{func.__name__}"
+                                coll = effective_config.chroma_collection_name or f"tapes_{func.__name__}"
                                 storage_config.update({"path": path, "collection_name": coll})
                             elif storage_type == "qdrant":
-                                url = (
-                                    effective_config.qdrant_url
-                                    or os.environ.get("MINDFUL_QDRANT_URL")
-                                    or "http://localhost:6333"
-                                )
-                                coll = (
-                                    effective_config.qdrant_collection_name
-                                    or os.environ.get("MINDFUL_QDRANT_COLLECTION")
-                                    or f"tapes_{func.__name__}"
-                                )
-                                api_key = effective_config.qdrant_api_key or os.environ.get("MINDFUL_QDRANT_API_KEY")
+                                url = effective_config.qdrant_url or "http://localhost:6333"
+                                coll = effective_config.qdrant_collection_name or f"tapes_{func.__name__}"
+                                api_key = effective_config.qdrant_api_key
                                 storage_config.update({"url": url, "collection_name": coll, "api_key": api_key})
                             # Add other storage types...
                             else:
@@ -227,7 +191,9 @@ def mindful(
                             # Use resolved type to import and instantiate
                             if storage_type == "chroma":
                                 try:
-                                    from mindful.vector_store.chroma import ChromaAdapter
+                                    from mindful.vector_store.chroma import (
+                                        ChromaAdapter,
+                                    )
 
                                     adapter = ChromaAdapter()
                                 except ImportError:
