@@ -20,6 +20,7 @@ from typing import (
 )
 
 from mindful.agent import MindfulAgent
+from mindful.config import MindfulConfig
 from mindful.memory.tape import (
     Tape,
     TapeDeck,
@@ -40,7 +41,9 @@ R = TypeVar("R")
 P = ParamSpec("P")
 
 
-def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Callable[P, R]]:
+def mindful(
+    input: str, *, debug: bool = False, config: Optional[MindfulConfig] = None
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """
     Factory for the `mindful` decorator. Configures the user input source
     and logging behavior for the 'mindful' package namespace.
@@ -49,9 +52,10 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
     defaulting to ChromaDB storage if not otherwise configured via environment variables.
 
     Args:
-        input (str): The parameter name holding user input in the decorated function.
-        debug (bool): Enables DEBUG level logging for the 'mindful' namespace
-                      and potentially adds a default handler.
+        input (str): The parameter name holding user input.
+        debug (bool): Enables DEBUG level logging for the 'mindful' namespace.
+        config (Optional[MindfulConfig]): User-provided configuration object.
+                                           Overrides env vars and defaults.
 
     Returns:
         Callable[[Callable[P, R]], Callable[P, R]]: The configured decorator.
@@ -71,10 +75,10 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
             if not package_logger.hasHandlers() and not _mindful_default_handler_configured:
                 logger.debug("Adding default debug handler for 'mindful' logger.")
                 handler = logging.StreamHandler(sys.stderr)
-                handler.setLevel(logging.DEBUG)  # Ensure handler emits DEBUG messages
+                handler.setLevel(logging.DEBUG)
                 handler.setFormatter(MindfulLogFormatter("%(message)s"))
                 package_logger.addHandler(handler)
-                package_logger.propagate = False  # Prevent propagation to root
+                package_logger.propagate = False  # prevent propagation to root
                 _mindful_default_handler_configured = True
             elif package_logger.hasHandlers():
                 logger.debug("Existing handlers found for 'mindful' logger.")
@@ -144,76 +148,106 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
                             f"Initializing Mindful components (TapeDeck, Storage, Agent) for '{func.__name__}'..."
                         )
                         try:
-                            # --- 1. Read Config (Defaults Chroma) ---
-                            storage_type = os.environ.get("MINDFUL_STORAGE_TYPE", "chroma").lower()
-                            storage_config: Dict[str, Any] = {}
-                            agent_config: Dict[str, Any] = {}
+                            # --- 1. Resolve Configuration (Config Obj -> Env -> Default) ---
+                            # Create a temporary config instance from the passed object or default
+                            effective_config = config if config is not None else MindfulConfig()
+                            wrapper_logger.debug(f"Using config object provided: {config is not None}")
 
-                            # Default Chroma config
+                            # Resolve Storage Type
+                            storage_type = effective_config.storage_type
+                            if storage_type is None:
+                                storage_type = os.environ.get("MINDFUL_STORAGE_TYPE")  # type: ignore
+                            if storage_type is None:
+                                storage_type = "chroma"  # default
+                            storage_type = storage_type.lower()  # type: ignore
+                            wrapper_logger.debug(f"Resolved storage_type: '{storage_type}'")
+
+                            # Resolve Agent Provider
+                            agent_provider = effective_config.agent_provider
+                            if agent_provider is None:
+                                agent_provider = os.environ.get("MINDFUL_PROVIDER")  # type: ignore
+                            if agent_provider is None:
+                                agent_provider = "openai"  # default
+                            agent_provider = agent_provider.lower()  # type: ignore
+                            wrapper_logger.debug(f"Resolved agent_provider: '{agent_provider}'")
+
+                            # Resolve Vector Size (Crucial!) - Config > Env > Default(Needs work)
+                            vector_size = effective_config.vector_size
+                            if vector_size is None:
+                                vs_env = os.environ.get("MINDFUL_VECTOR_SIZE")
+                                if vs_env:
+                                    vector_size = int(vs_env)
+                            if vector_size is None:
+                                # TODO: Need a better default or way to infer this!
+                                vector_size = 1536  # placeholder default
+                                wrapper_logger.warning(
+                                    f"Vector size not specified, defaulting to {vector_size}. Ensure this matches your embedding model!"
+                                )
+
+                            # --- Create specific config dicts using resolved values ---
+                            storage_config: Dict[str, Any] = {"vector_size": vector_size}
                             if storage_type == "chroma":
-                                storage_config = {
-                                    "path": os.environ.get("MINDFUL_CHROMA_PATH", f"./mindful_db_{func.__name__}"),
-                                    "collection_name": os.environ.get(
-                                        "MINDFUL_CHROMA_COLLECTION", f"tapes_{func.__name__}"
-                                    ),
-                                }
-                            # Add elif blocks for qdrant, pinecone based on env vars
+                                path = (
+                                    effective_config.chroma_path
+                                    or os.environ.get("MINDFUL_CHROMA_PATH")
+                                    or f"./mindful_db_{func.__name__}"
+                                )
+                                coll = (
+                                    effective_config.chroma_collection_name
+                                    or os.environ.get("MINDFUL_CHROMA_COLLECTION")
+                                    or f"tapes_{func.__name__}"
+                                )
+                                storage_config.update({"path": path, "collection_name": coll})
                             elif storage_type == "qdrant":
-                                storage_config = {
-                                    "url": os.environ.get("MINDFUL_QDRANT_URL", "http://localhost:6333"),
-                                    "collection_name": os.environ.get(
-                                        "MINDFUL_QDRANT_COLLECTION", f"tapes_{func.__name__}"
-                                    ),
-                                    "api_key": os.environ.get("MINDFUL_QDRANT_API_KEY"),
-                                }
-                            # Add more storage types...
+                                url = (
+                                    effective_config.qdrant_url
+                                    or os.environ.get("MINDFUL_QDRANT_URL")
+                                    or "http://localhost:6333"
+                                )
+                                coll = (
+                                    effective_config.qdrant_collection_name
+                                    or os.environ.get("MINDFUL_QDRANT_COLLECTION")
+                                    or f"tapes_{func.__name__}"
+                                )
+                                api_key = effective_config.qdrant_api_key or os.environ.get("MINDFUL_QDRANT_API_KEY")
+                                storage_config.update({"url": url, "collection_name": coll, "api_key": api_key})
+                            # Add other storage types...
                             else:
-                                raise ValueError(f"Unsupported storage type: {storage_type}")
+                                raise ValueError(f"Unsupported storage type resolved: {storage_type}")
 
-                            # Agent config (using non-DI MindfulAgent)
-                            agent_provider = os.environ.get("MINDFUL_PROVIDER", "openai")
-                            agent_init_kwargs = {"provider_name": agent_provider}
-                            # Add logic to pass model overrides from env vars if needed
-
-                            # TODO: Determine vector_size robustly! Critical config.
-                            # Needs input from Agent config or dedicated env var.
-                            vector_size = int(os.environ.get("MINDFUL_VECTOR_SIZE", 3072))  # example default
-                            storage_config["vector_size"] = vector_size
-                            wrapper_logger.debug(f"Using vector size: {vector_size}")
+                            # Agent init kwargs (using non-DI Agent)
+                            agent_init_kwargs = effective_config.get_agent_init_kwargs(agent_provider)
+                            # Update with env var overrides if necessary (e.g., model names if Agent supports it)
 
                             # --- 2. Instantiate Components ---
                             wrapper_logger.debug(
                                 f"Attempting init: Storage={storage_type}, AgentProvider={agent_provider}"
                             )
                             adapter: StorageAdapter
+                            # Use resolved type to import and instantiate
                             if storage_type == "chroma":
                                 try:
                                     from mindful.vector_store.chroma import ChromaAdapter
 
                                     adapter = ChromaAdapter()
                                 except ImportError:
-                                    raise ImportError(
-                                        "ChromaDB adapter selected but `pip install mindful[chroma]` needed."
-                                    )
+                                    raise ImportError("`pip install mindful[chroma]` needed.")
                             elif storage_type == "qdrant":
                                 try:
                                     # from mindful.vector_store.qdrant import QdrantAdapter
-
-                                    # adapter = QdrantAdapter()
                                     pass
+                                    # adapter = QdrantAdapter()
                                 except ImportError:
-                                    raise ImportError(
-                                        "Qdrant adapter selected but `pip install mindful[qdrant]` needed."
-                                    )
-                            # Add other types...
+                                    raise ImportError("`pip install mindful[qdrant]` needed.")
+                            # Add other elif...
                             else:
-                                raise RuntimeError("Invalid storage type survived check")
+                                raise RuntimeError("Invalid resolved storage type")
 
                             adapter.initialize(storage_config)
                             wrapper_logger.debug(f"Storage adapter '{storage_type}' initialized.")
 
                             agent = MindfulAgent(**agent_init_kwargs)
-                            wrapper_logger.debug(f"MindfulAgent initialized for provider '{agent_provider}'.")
+                            wrapper_logger.debug(f"MindfulAgent initialized.")
 
                             # Instantiate the *refactored* TapeDeck, injecting dependencies
                             initialized_deck = TapeDeck(vector_store=adapter, agent=agent)
@@ -221,27 +255,19 @@ def mindful(input: str, debug: bool = False) -> Callable[[Callable[P, R]], Calla
 
                             # --- Store the Initialized TapeDeck ---
                             setattr(instance_or_wrapper, core_attr_name, initialized_deck)
-                            wrapper_logger.info(f"Mindful components initialized successfully for '{func.__name__}'.")
-
-                            # TODO: Need evolutions?
+                            wrapper_logger.info(f"Mindful components initialized using {storage_type}.")
 
                         except Exception as e:
                             wrapper_logger.exception(f"CRITICAL ERROR during Mindful initialization.", exc_info=e)
-                            # Don't set the attribute if init failed
                             raise RuntimeError(f"Mindful initialization failed: {e}") from e
 
+            # --- Get Initialized TapeDeck ---
             try:
-                # Retrieve the initialized TapeDeck stored in _mindful_core
                 tape_deck = getattr(instance_or_wrapper, core_attr_name)
-                if not isinstance(tape_deck, TapeDeck) or not hasattr(tape_deck, "storage"):
-                    # This indicates a problem if hasattr was true but it's not the right object
-                    raise TypeError("Attribute _mindful_core is not a properly initialized TapeDeck.")
+                if not isinstance(tape_deck, TapeDeck):
+                    raise TypeError("Invalid _mindful_core attribute.")
             except AttributeError:
-                # This should ideally not happen if init logic is correct, but handle defensively
-                wrapper_logger.error(
-                    f"Mindful TapeDeck not found for '{func.__name__}'. Initialization may have failed on first call."
-                )
-                raise RuntimeError("Mindful TapeDeck instance could not be retrieved.")
+                raise RuntimeError("Mindful TapeDeck instance not found. Initialization likely failed.")
 
             if debug:
                 # Log the TapeDeck instance being used *after* initialization/retrieval
