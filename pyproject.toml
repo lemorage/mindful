@@ -20,6 +20,11 @@ dependencies = [
 [project.scripts]
 mindful = "mindful:main"
 
+[project.optional-dependencies]
+qdrant = [
+    "qdrant-client>=1.14.2",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
