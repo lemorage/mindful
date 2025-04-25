@@ -82,7 +82,7 @@ class MindfulAgent:
 
         logger.info(
             f"MindfulAgent initialized with provider '{key}'. "
-            f"Metadata model: '{self.completion_model}', "
+            f"Completion model: '{self.completion_model}', "
             f"Embedding model: '{self.embedding_model or 'Not Applicable'}'"
         )
 
@@ -211,3 +211,16 @@ Content:
             # Catch potential API errors etc.
             logger.exception(f"Embedding generation failed: {e}", exc_info=True)
             return None
+
+    def summarize_content(self, content: str) -> Optional[str]:
+        """
+        Generate a summary of the given content using the configured provider.
+
+        Args:
+            content: The text content to summarize.
+
+        Returns:
+            A string containing the summary, or None if summarization fails.
+        """
+        logger.debug(f"Generating summary for content: '{content[:50]}...'")
+        return ""  # placeholder for actual summarization logic

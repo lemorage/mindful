@@ -72,6 +72,37 @@ class StorageAdapter(ABC):
         """Retrieves all tape IDs (needed for some evolution tasks, use cautiously)."""
         pass
 
+    @abstractmethod
+    def find_ids_by_filter(
+        self,
+        filter_dict: Dict[str, Any],
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        sort_by: Optional[str] = None,
+        sort_desc: bool = True,
+    ) -> List[str]:
+        """
+        Finds Tape IDs based solely on metadata filtering criteria.
+
+        Args:
+            filter_dict (Dict[str, Any]): Dictionary defining the metadata filters.
+                The structure and supported operators (e.g., {'priority_lte': 5},
+                {'status': 'active'}, {'role': {'$in': ['user', 'assistant']}})
+                depend on the concrete adapter's translation logic for its backend.
+                Keys should correspond to indexed Tape metadata fields.
+            limit (Optional[int]): Maximum number of IDs to return.
+            offset (Optional[int]): Number of IDs to skip (for pagination).
+            sort_by (Optional[str]): Metadata field to sort results by (e.g., 'last_accessed').
+                                      Support depends on backend capability.
+            sort_desc (bool): If True, sort descending; otherwise ascending.
+
+        Returns:
+            List[str]: A list of Tape IDs matching the filter criteria, potentially
+                       limited, offset, and sorted. Returns empty list if none found
+                       or on error (implementations should log errors).
+        """
+        pass
+
     # TODO: Add methods for keyword search, complex metadata queries if needed
     # @abstractmethod
     # def keyword_search(...) -> List[Tuple[str, float]]: ...
