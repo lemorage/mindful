@@ -21,10 +21,8 @@ from typing import (
 
 from mindful.agent import MindfulAgent
 from mindful.config import MindfulConfig
-from mindful.memory.tape import (
-    Tape,
-    TapeDeck,
-)
+from mindful.memory.tape import Tape
+from mindful.memory.tape_deck import TapeDeck
 from mindful.utils import MindfulLogFormatter
 from mindful.vector_store.storage import StorageAdapter
 
