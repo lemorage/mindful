@@ -25,6 +25,7 @@ try:
         Filter,
         MatchValue,
         MatchAny,
+        OrderBy,
         PointStruct,
         Range,
         VectorParams,
@@ -367,26 +368,112 @@ class QdrantAdapter(StorageAdapter):
             return []
 
     def get_all_tape_ids(self) -> List[str]:
-        # WARNING: Inefficient for large collections without using scroll API properly.
-        # This basic implementation fetches all at once up to a limit.
         if not self.client or not self.collection_name:
             raise ConnectionError("Qdrant client not initialized")
-        logger.warning("get_all_tape_ids is potentially slow/memory-intensive for large Qdrant collections!")
         try:
-            # Use scroll with a reasonable limit or implement proper pagination
-            # Fetching only IDs is efficient via payload/vector=False
-            all_points, _ = self.client.scroll(
-                collection_name=self.collection_name,
-                limit=10000,  # set a practical limit or use pagination
-                with_payload=False,
-                with_vectors=False,
-            )
-            if len(all_points) == 10000:  # hit limit? just log warning.
-                logger.warning("Fetched max limit (10000) of tape IDs. Full list may be truncated.")
-
-            return [str(point.id) for point in all_points]
+            all_ids: List[str] = []
+            scroll_offset = None
+            batch_size = 1000
+            while True:
+                points, next_offset = self.client.scroll(
+                    collection_name=self.collection_name,
+                    limit=batch_size,
+                    offset=scroll_offset,
+                    with_payload=False,
+                    with_vectors=False,
+                )
+                all_ids.extend(str(point.id) for point in points)
+                scroll_offset = next_offset
+                if not next_offset or not points:
+                    break
+            logger.debug(f"Fetched {len(all_ids)} tape IDs from Qdrant")
+            return all_ids
         except Exception as e:
             logger.error(f"Failed to get all tape IDs from Qdrant: {e}", exc_info=True)
+            return []
+
+    def find_ids_by_filter(
+        self,
+        filter_dict: Dict[str, Any],
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        sort_by: Optional[str] = None,
+        sort_desc: bool = True,
+    ) -> List[str]:
+        """
+        Finds Tape IDs based solely on metadata filtering criteria in Qdrant.
+
+        Args:
+            filter_dict: Dictionary defining metadata filters (e.g., {'status': 'active', 'priority_lte': 3}).
+                        Supports operators like '$eq', '$in', '$gte', '$lte', and suffix-based '_gte', '_lte'.
+            limit: Maximum number of IDs to return. If None, returns all matching IDs.
+            offset: Number of IDs to skip for pagination. Defaults to 0 if None.
+            sort_by: Payload field to sort results by (e.g., 'created_at'). Uses Qdrant native sorting if supported.
+            sort_desc: If True, sort in descending order; otherwise, ascending.
+
+        Returns:
+            List[str]: A list of Tape IDs matching the filter criteria, potentially limited, offset, and sorted.
+                    Returns an empty list if none found or on error (errors are logged).
+        """
+        if not self.client or not self.collection_name:
+            logger.error("Qdrant client not initialized")
+            return []
+
+        # Validate inputs
+        offset = offset or 0
+        if offset < 0 or (limit is not None and limit < 0):
+            logger.error(f"Invalid pagination parameters: offset={offset}, limit={limit}")
+            return []
+        supported_sort_fields = {"created_at", "last_accessed", "priority", "status"}
+        if sort_by and sort_by not in supported_sort_fields:
+            logger.warning(f"Unsupported sort_by field '{sort_by}' in Qdrant. Falling back to unsorted results.")
+            sort_by = None
+
+        try:
+            # Build Qdrant filter
+            qdrant_filter = _build_qdrant_filter(filter_dict) if filter_dict else None
+            logger.debug(
+                f"Qdrant find_ids_by_filter: filter={qdrant_filter}, limit={limit}, offset={offset}, sort_by={sort_by}, sort_desc={sort_desc}"
+            )
+
+            # Prepare sorting
+            order_by = None
+            if sort_by:
+                direction = "desc" if sort_desc else "asc"
+                order_by = OrderBy(key=sort_by, direction=direction)
+
+            # Scroll through results
+            all_ids: List[str] = []
+            scroll_offset = None
+            batch_size = min(1000, limit) if limit else 1000
+            remaining_limit = limit
+
+            while True:
+                current_limit = min(batch_size, remaining_limit) if remaining_limit else batch_size
+                points, next_offset = self.client.scroll(
+                    collection_name=self.collection_name,
+                    query_filter=qdrant_filter,
+                    limit=current_limit,
+                    offset=scroll_offset if scroll_offset else offset,
+                    with_payload=False,
+                    with_vectors=False,
+                    order_by=order_by,
+                )
+                all_ids.extend(str(point.id) for point in points)
+                scroll_offset = next_offset
+                if not points or not next_offset or (remaining_limit and len(all_ids) >= remaining_limit):
+                    break
+                if remaining_limit:
+                    remaining_limit -= len(points)
+
+            if limit is not None and len(all_ids) > limit:
+                all_ids = all_ids[:limit]
+
+            logger.debug(f"Returning {len(all_ids)} IDs after applying filter and pagination")
+            return all_ids
+
+        except Exception as e:
+            logger.error(f"Failed to find IDs by filter in Qdrant: {e}", exc_info=True)
             return []
 
     def close(self) -> None:
