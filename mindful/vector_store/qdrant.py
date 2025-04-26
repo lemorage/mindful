@@ -24,6 +24,7 @@ try:
         FieldCondition,
         Filter,
         MatchValue,
+        MatchAny,
         PointStruct,
         Range,
         VectorParams,
@@ -89,38 +90,39 @@ def _qdrant_hit_to_tape(hit: models.ScoredPoint | models.Record) -> Optional[Tap
 def _build_qdrant_filter(filter_dict: Dict[str, Any]) -> Optional[Filter]:  # type: ignore[no-any-unimported]
     """Translates a generic filter dict to Qdrant's Filter model."""
     must_conditions = []
-    # TODO: EXPAND THIS BASED ON ACTUAL FILTERING NEEDS
     for key, value in filter_dict.items():
-        if key == "role":
-            must_conditions.append(FieldCondition(key=key, match=MatchValue(value=value)))
-        elif key == "category":
-            must_conditions.append(FieldCondition(key=key, match=MatchValue(value=value)))
-        elif key == "priority_gte":
-            must_conditions.append(FieldCondition(key="priority", range=Range(gte=value)))
-        elif key == "priority_lte":
-            must_conditions.append(FieldCondition(key="priority", range=Range(lte=value)))
-        elif key == "created_before":
-            iso_date = value.isoformat() if isinstance(value, datetime) else str(value)
-            must_conditions.append(FieldCondition(key="created_at", range=Range(lt=iso_date)))
-        elif key == "keywords_contain":  # check if list contains ANY of these
-            if isinstance(value, list):
-                # Qdrant doesn't directly support 'contains any' on keyword lists easily this way.
-                # Requires different schema (e.g., full-text index) or multiple 'should' conditions.
-                # For simplicity, let's assume an exact match on the full keywords list for now,
-                # or handle specific keyword checks if needed.
-                logger.warning("Complex keyword filtering not fully implemented in this example.")
-                # Example: Match if keywords list *exactly* matches `value`
-                # must_conditions.append(FieldCondition(key="keywords", match=models.MatchValue(value=value)))
+        if isinstance(value, dict) and len(value) == 1:  # handle explicit operators
+            op, val = next(iter(value.items()))
+            if op == "$eq":
+                must_conditions.append(FieldCondition(key=key, match=MatchValue(value=val)))
+            elif op == "$in" and isinstance(val, list):
+                must_conditions.append(FieldCondition(key=key, match=MatchAny(any=val)))
+            elif op == "$gte":
+                val = val.isoformat() if isinstance(val, datetime) else val
+                must_conditions.append(FieldCondition(key=key, range=Range(gte=val)))
+            elif op == "$lte":
+                val = val.isoformat() if isinstance(val, datetime) else val
+                must_conditions.append(FieldCondition(key=key, range=Range(lte=val)))
             else:
-                must_conditions.append(FieldCondition(key="keywords", match=models.MatchValue(value=value)))
-
-        # Add more complex conditions (AND, OR, NOT) -> should, must_not
+                logger.warning(f"Unsupported operator '{op}' for key '{key}' in Qdrant filter")
+        elif key.endswith("_gte"):
+            field = key[:-4]
+            val = value.isoformat() if isinstance(field, datetime) else value
+            must_conditions.append(FieldCondition(key=field, range=Range(gte=val)))
+        elif key.endswith("_lte"):
+            field = key[:-4]
+            val = value.isoformat() if isinstance(field, datetime) else value
+            must_conditions.append(FieldCondition(key=field, range=Range(lte=val)))
+        elif key == "keywords_contain":
+            if isinstance(value, list):
+                must_conditions.append(FieldCondition(key="keywords", match=MatchAny(any=value)))
+            else:
+                must_conditions.append(FieldCondition(key="keywords", match=MatchValue(value=value)))
         else:
-            logger.warning(f"Unsupported filter key in QdrantAdapter: {key}")
+            # Default to equality match
+            must_conditions.append(FieldCondition(key=key, match=MatchValue(value=value)))
 
-    if must_conditions:
-        return Filter(must=must_conditions)
-    return None
+    return Filter(must=must_conditions) if must_conditions else None
 
 
 class QdrantAdapter(StorageAdapter):
