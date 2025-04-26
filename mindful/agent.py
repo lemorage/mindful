@@ -16,6 +16,7 @@ from mindful.llm.llm_base import (
     ToolDefinition,
 )
 from mindful.llm.openai import OpenAI
+from mindful.memory.tape import Tape
 from mindful.models import (
     TapeMetadata,
     pydantic_to_openai_tool,
@@ -212,15 +213,51 @@ Content:
             logger.exception(f"Embedding generation failed: {e}", exc_info=True)
             return None
 
-    def summarize_content(self, content: str) -> Optional[str]:
+    def summarize_content(self, content: str, max_length: int = 150) -> Optional[str]:
         """
         Generate a summary of the given content using the configured provider.
 
         Args:
             content: The text content to summarize.
+            max_length: Approximate desired maximum length of the summary in words.
 
         Returns:
-            A string containing the summary, or None if summarization fails.
+            The generated summary string, or None on failure.
         """
-        logger.debug(f"Generating summary for content: '{content[:50]}...'")
-        return ""  # placeholder for actual summarization logic
+        logger.debug(f"Requesting summarization for content (first 100 chars): '{content[:100]}...'")
+
+        prompt = f"""Please summarize the following text concisely. Aim for a summary under {max_length} words that captures the main points and key information.
+
+Text to Summarize:
+\"\"\"
+{content}
+\"\"\"
+
+Summary:
+"""
+        messages: List[ChatMessage] = [{"role": "user", "content": prompt}]
+
+        try:
+            # TODO: Consider adding a dedicated summarization_model config later
+            parsed_response = self.provider.complete_chat(
+                model=self.provider.model,
+                messages=messages,
+                tools=None,
+                tool_choice=None,
+                temperature=0.5,
+                max_tokens=max_length * 4,  # estimate tokens based on words
+            )
+
+            if parsed_response and parsed_response.get("content"):
+                summary: str = parsed_response["content"].strip()
+                logger.info(f"Summarization successful (length: {len(summary)}).")
+                return summary
+            else:
+                logger.warning(
+                    f"Summarization failed: LLM response did not contain content. Response: {parsed_response}"
+                )
+                return None
+
+        except Exception as e:
+            logger.exception(f"LLM call failed during summarization: {e}", exc_info=True)
+            return None
