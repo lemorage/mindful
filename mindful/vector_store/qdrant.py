@@ -185,14 +185,37 @@ class QdrantAdapter(StorageAdapter):
 
             if not collection_exists and create:
                 logger.info(f"Attempting to create Qdrant collection '{self.collection_name}'...")
-                self.client.recreate_collection(  # use recreate_collection or create_collection
+                self.client.recreate_collection(
                     collection_name=self.collection_name,
                     vectors_config=VectorParams(size=self.vector_size, distance=self.distance_metric),
                     # TODO: Add payload index schema creation based on Tape fields for filtering
                     # self.client.create_payload_index(...) for category, role, priority etc.
                 )
-                logger.info(
-                    f"Created Qdrant collection '{self.collection_name}'. Remember to configure payload indexes for filtering."
+                # Create payload indexes for efficient filtering
+                index_fields = [
+                    ("status", models.PayloadFieldType.KEYWORD),
+                    ("priority", models.PayloadFieldType.INTEGER),
+                    ("role", models.PayloadFieldType.KEYWORD),
+                    ("category", models.PayloadFieldType.KEYWORD),
+                    ("created_at", models.PayloadFieldType.DATETIME),
+                    ("last_accessed", models.PayloadFieldType.DATETIME),
+                ]
+                for field_name, field_type in index_fields:
+                    try:
+                        self.client.create_payload_index(
+                            collection_name=self.collection_name,
+                            field_name=field_name,
+                            field_schema=field_type,
+                        )
+                        logger.debug(
+                            f"Created payload index for field '{field_name}' in collection '{self.collection_name}'"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to create payload index for field '{field_name}': {e}")
+                logger.info(f"Created Qdrant collection '{self.collection_name}' with payload indexes.")
+            elif not collection_exists and not create:
+                raise RuntimeError(
+                    f"Qdrant collection '{self.collection_name}' does not exist and creation is disabled."
                 )
             elif not collection_exists and not create:
                 raise RuntimeError(
