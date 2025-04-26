@@ -12,12 +12,11 @@ from typing import (
 )
 import uuid
 
-from mindful.memory.tape import Tape
-from mindful.vector_store.storage import StorageAdapter
-
-
 from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
+
+from mindful.memory.tape import Tape
+from mindful.vector_store.storage import StorageAdapter
 
 logger = logging.getLogger("mindful")
 
@@ -438,6 +437,106 @@ class ChromaAdapter(StorageAdapter):
             return cast(List[str], results.get("ids", []))
         except Exception as e:
             logger.error(f"Failed to get all tape IDs from Chroma: {e}", exc_info=True)
+            return []
+
+    def find_ids_by_filter(
+        self,
+        filter_dict: Dict[str, Any],
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        sort_by: Optional[str] = None,
+        sort_desc: bool = True,
+    ) -> List[str]:
+        """
+        Finds Tape IDs based solely on metadata filtering criteria in ChromaDB.
+
+        Args:
+            filter_dict: Dictionary defining metadata filters (e.g., {'status': 'active', 'priority_lte': 3}).
+                         Supports operators via keys like 'priority_lte' or explicit {'field': {'$op': value}}.
+            limit: Maximum number of IDs to return. If None, returns all matching IDs (subject to Chroma limits).
+            offset: Number of IDs to skip for pagination. Defaults to 0 if None.
+            sort_by: Metadata field to sort results by (e.g., 'created_at'). Sorting is performed in-memory.
+                     If None, results are unsorted.
+            sort_desc: If True, sort in descending order; otherwise, ascending.
+
+        Returns:
+            List[str]: A list of Tape IDs matching the filter criteria, potentially limited, offset, and sorted.
+                       Returns an empty list if none found or on error (errors are logged).
+        """
+        if not self.collection:
+            logger.error("Chroma collection not initialized")
+            return []
+
+        try:
+            # Translate filter_dict to Chroma's 'where' format
+            where_filter = _build_chroma_where_filter(filter_dict) if filter_dict else None
+            logger.debug(
+                f"Chroma find_ids_by_filter: where={where_filter}, limit={limit}, offset={offset}, sort_by={sort_by}, sort_desc={sort_desc}"
+            )
+
+            # Fetch IDs using Chroma's get method with where filter
+            results = self.collection.get(
+                where=where_filter,
+                include=[],  # only fetch IDs to minimize data transfer
+            )
+            ids: List[str] = results.get("ids", [])
+            logger.debug(f"Retrieved {len(ids)} IDs from Chroma for filter: {filter_dict}")
+
+            # Apply sorting if requested (in-memory, as Chroma doesn't support native sorting)
+            if sort_by:
+                logger.warning(
+                    f"Sorting by '{sort_by}' is performed in-memory, which may be inefficient for large result sets."
+                )
+                # To sort, we need metadata for the sort_by field
+                results_with_meta = self.collection.get(
+                    where=where_filter,
+                    include=["metadatas"],
+                )
+                ids = results_with_meta.get("ids", [])
+                metadatas = results_with_meta.get("metadatas", [])
+
+                if not ids or not metadatas:
+                    logger.debug("No results with metadata for sorting")
+                    return []
+
+                # Pair IDs with sort values
+                id_value_pairs = []
+                for id_, meta in zip(ids, metadatas):
+                    if meta and sort_by in meta:
+                        value = meta[sort_by]
+                        if sort_by in ["created_at", "updated_at", "last_accessed", "expires_at"] and isinstance(
+                            value, str
+                        ):
+                            try:
+                                value = datetime.fromisoformat(value)
+                            except ValueError:
+                                logger.warning(f"Invalid datetime format for {sort_by} in tape {id_}: {value}")
+                                continue
+                        id_value_pairs.append((id_, value))
+                    else:
+                        logger.debug(f"Missing sort_by field '{sort_by}' in metadata for tape {id_}")
+                        continue
+
+                # Sort pairs based on value
+                id_value_pairs.sort(key=lambda x: x[1], reverse=sort_desc)
+                ids = [pair[0] for pair in id_value_pairs]
+
+            # Apply pagination
+            offset = offset or 0
+            if offset > len(ids):
+                logger.debug(f"Offset {offset} exceeds result count {len(ids)}")
+                return []
+
+            if limit is not None:
+                ids = ids[offset : offset + limit]
+            else:
+                ids = ids[offset:]
+
+            logger.debug(f"Returning {len(ids)} IDs after applying offset={offset} and limit={limit}")
+            return ids
+
+        except Exception as e:
+            logger.error(f"Failed to find IDs by filter in Chroma: {e}", exc_info=True)
             return []
 
     def close(self) -> None:
