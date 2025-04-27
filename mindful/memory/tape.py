@@ -1,4 +1,7 @@
-from datetime import datetime, timezone
+from datetime import (
+    datetime,
+    timezone,
+)
 import logging
 from typing import (
     Dict,
@@ -10,6 +13,7 @@ from uuid import uuid4
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
 )
 
@@ -55,6 +59,8 @@ class Tape(BaseModel):
                       Defaults to 'active'. Used for filtering during retrieval and evolution tasks.
     """
 
+    model_config = ConfigDict(validate_assignment=True)
+
     # --- Core Identifiers & Content ---
     id: str = Field(
         default_factory=lambda: str(uuid4()), description="Universally unique identifier (UUID string). Primary key."
@@ -93,9 +99,6 @@ class Tape(BaseModel):
         default_factory=list, description="History of modifications and updates."
     )
     status: str = Field("active", description="Lifecycle status (e.g., 'active', 'archived').")
-
-    class Config:
-        validate_assignment = True
 
     def update_content(self, new_content: str, reason: Optional[str] = None) -> None:
         """

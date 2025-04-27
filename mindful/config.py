@@ -1,17 +1,17 @@
+import logging
+from pathlib import Path
 from typing import (
     Any,
     Dict,
     Literal,
     Optional,
 )
-import logging
-from pathlib import Path
 
 from pydantic import (
     Field,
     model_validator,
 )
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from mindful.cli import get_mindful_config_dir
 
@@ -24,6 +24,8 @@ class MindfulConfig(BaseSettings):  # type: ignore
 
     Settings can be provided here, overriding environment variables and defaults.
     """
+
+    model_config = SettingsConfigDict(env_prefix="MINDFUL_", extra="ignore", populate_by_name=True)
 
     # Storage Configuration
     storage_type: Optional[Literal["chroma", "qdrant", "pinecone"]] = Field(
@@ -38,7 +40,9 @@ class MindfulConfig(BaseSettings):  # type: ignore
         default=None, description="Path for ChromaDB persistent storage. Env: MINDFUL_CHROMA_PATH"
     )
     chroma_collection_name: Optional[str] = Field(
-        default=None, description="Collection name for ChromaDB. Env: MINDFUL_CHROMA_COLLECTION"
+        default=None,
+        alias="MINDFUL_CHROMA_COLLECTION",
+        description="Collection name for ChromaDB. Env: MINDFUL_CHROMA_COLLECTION",
     )
 
     # Qdrant Specific
@@ -48,7 +52,7 @@ class MindfulConfig(BaseSettings):  # type: ignore
     )
     qdrant_collection_name: Optional[str] = Field(
         default=None,
-        alias="QDRANT_COLLECTION",
+        alias="MINDFUL_QDRANT_COLLECTION",
         description="Collection name for Qdrant. Env: MINDFUL_QDRANT_COLLECTION",
     )
 
@@ -61,15 +65,11 @@ class MindfulConfig(BaseSettings):  # type: ignore
 
     # Agent Configuration
     agent_provider: Optional[Literal["openai", "anthropic"]] = Field(
-        default=None, description="LLM provider for the agent ('openai', 'anthropic'). Env: MINDFUL_PROVIDER"
+        default=None, description="LLM provider for the agent ('openai', 'anthropic'). Env: MINDFUL_AGENT_PROVIDER"
     )
     # Add fields for agent model overrides here?
     # agent_completion_model: Optional[str] = Field(default=None, ...)
     # agent_embedding_model: Optional[str] = Field(default=None, ...)
-
-    class Config:
-        env_prefix = "MINDFUL_"
-        extra = "ignore"  # ignore unexpected env vars
 
     @model_validator(mode="after")
     def validate_storage_requirements(self) -> "MindfulConfig":
