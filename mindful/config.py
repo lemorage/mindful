@@ -4,6 +4,8 @@ from typing import (
     Literal,
     Optional,
 )
+import logging
+from pathlib import Path
 
 from pydantic import (
     Field,
@@ -11,8 +13,12 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings
 
+from mindful.cli import get_mindful_config_dir
 
-class MindfulConfig(BaseSettings):   # type: ignore
+logger = logging.getLogger("mindful")
+
+
+class MindfulConfig(BaseSettings):  # type: ignore
     """
     Configuration object for the Mindful decorator.
 
@@ -82,14 +88,27 @@ class MindfulConfig(BaseSettings):   # type: ignore
         return self
 
     def get_storage_config(self, resolved_storage_type: str, func_name: str) -> Dict[str, Any]:
+        """
+        Generate storage configuration dictionary for the given storage type.
+
+        Args:
+            resolved_storage_type (str): The resolved storage type (e.g., 'chroma', 'qdrant').
+            func_name (str): The name of the decorated function for default naming.
+
+        Returns:
+            Dict[str, Any]: Configuration dictionary for the storage backend.
+        """
+        config_dir = get_mindful_config_dir()
         config: Dict[str, Any] = {"vector_size": self.vector_size}  # vector size needed by all potentially
         if resolved_storage_type == "chroma":
-            config["path"] = self.chroma_path or f"./mindful_db_{func_name}"
+            default_path = str(config_dir / "db" / f"mindful_db_{func_name}")
+            config["path"] = self.chroma_path or default_path
             config["collection_name"] = self.chroma_collection_name or f"tapes_{func_name}"
+            Path(config["path"]).parent.mkdir(parents=True, exist_ok=True)
         elif resolved_storage_type == "qdrant":
             config["url"] = self.qdrant_url or "http://localhost:6333"
             config["collection_name"] = self.qdrant_collection_name or f"tapes_{func_name}"
-            config["api_key"] = self.qdrant_api_key  # Can be None
+            config["api_key"] = self.qdrant_api_key  # can be None
         elif resolved_storage_type == "pinecone":
             config["api_key"] = self.pinecone_api_key
             config["index_name"] = (
@@ -97,12 +116,48 @@ class MindfulConfig(BaseSettings):   # type: ignore
             )  # example default
             if not config["api_key"] or not config["index_name"]:
                 raise ValueError("Pinecone config requires 'pinecone_api_key' and 'pinecone_index_name'.")
+        else:
+            raise ValueError(f"Unsupported storage type: {resolved_storage_type}")
         # TODO: Add other types...
         return config
 
     def get_agent_init_kwargs(self, resolved_provider: str) -> Dict[str, Any]:
+        """
+        Generate initialization kwargs for the MindfulAgent.
+
+        Args:
+            resolved_provider (str): The resolved agent provider (e.g., 'openai', 'anthropic').
+
+        Returns:
+            Dict[str, Any]: Keyword arguments for agent initialization.
+        """
         kwargs = {"provider_name": resolved_provider}
         # Add model overrides if they exist in the config object
         # if self.agent_completion_model: kwargs["completion_model_override"] = self.agent_completion_model
         # if self.agent_embedding_model: kwargs["embedding_model_override"] = self.agent_embedding_model
         return kwargs
+
+
+def load_mindful_config(config: Optional[MindfulConfig] = None) -> MindfulConfig:
+    """
+    Load the Mindful configuration with the following precedence:
+    1. User-provided MindfulConfig object (if provided).
+    2. Environment variables (via Pydantic BaseSettings).
+    3. Defaults defined in MindfulConfig.
+
+    Args:
+        config (Optional[MindfulConfig]): User-provided configuration object.
+
+    Returns:
+        MindfulConfig: The resolved configuration object.
+    """
+    if config is not None:
+        return config
+
+    try:
+        resolved_config = MindfulConfig()
+        logger.debug("Mindful configuration resolved from environment variables or defaults.")
+        return resolved_config
+    except Exception as e:
+        logger.error(f"Failed to resolve configuration: {e}")
+        raise RuntimeError(f"Invalid mindful configuration: {e}")

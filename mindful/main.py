@@ -20,7 +20,7 @@ from typing import (
 )
 
 from mindful.agent import MindfulAgent
-from mindful.config import MindfulConfig
+from mindful.config import MindfulConfig, load_mindful_config
 from mindful.memory.tape import Tape
 from mindful.memory.tape_deck import TapeDeck
 from mindful.utils import MindfulLogFormatter
@@ -147,7 +147,7 @@ def mindful(
                         )
                         try:
                             # --- 1. Resolve Configuration (Config Obj -> Env -> Default) ---
-                            effective_config = config or MindfulConfig()
+                            effective_config = load_mindful_config(config)
                             wrapper_logger.debug(f"Using config object provided: {config is not None}")
 
                             # Let BaseSettings resolve from env; fallback defaults handled here
@@ -163,19 +163,7 @@ def mindful(
                                 )
 
                             # --- Create specific config dicts using resolved values ---
-                            storage_config: Dict[str, Any] = {"vector_size": vector_size}
-                            if storage_type == "chroma":
-                                path = effective_config.chroma_path or f"./mindful_db_{func.__name__}"
-                                coll = effective_config.chroma_collection_name or f"tapes_{func.__name__}"
-                                storage_config.update({"path": path, "collection_name": coll})
-                            elif storage_type == "qdrant":
-                                url = effective_config.qdrant_url or "http://localhost:6333"
-                                coll = effective_config.qdrant_collection_name or f"tapes_{func.__name__}"
-                                api_key = effective_config.qdrant_api_key
-                                storage_config.update({"url": url, "collection_name": coll, "api_key": api_key})
-                            # Add other storage types...
-                            else:
-                                raise ValueError(f"Unsupported storage type resolved: {storage_type}")
+                            storage_config = effective_config.get_storage_config(storage_type, func.__name__)
 
                             # Agent init kwargs (using non-DI Agent)
                             agent_init_kwargs = effective_config.get_agent_init_kwargs(agent_provider)
@@ -198,9 +186,10 @@ def mindful(
                                     raise ImportError("`pip install mindful[chroma]` needed.")
                             elif storage_type == "qdrant":
                                 try:
-                                    # from mindful.vector_store.qdrant import QdrantAdapter
+                                    from mindful.vector_store.qdrant import QdrantAdapter
+
                                     pass
-                                    # adapter = QdrantAdapter()
+                                    adapter = QdrantAdapter()
                                 except ImportError:
                                     raise ImportError("`pip install mindful[qdrant]` needed.")
                             # Add other elif...

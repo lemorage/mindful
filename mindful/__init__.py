@@ -1,6 +1,6 @@
 # type: ignore
 
-__version__ = "0.0.1"
-
-
 from .main import mindful
+from .config import MindfulConfig
+
+__all__ = ["mindful", "MindfulConfig"]
