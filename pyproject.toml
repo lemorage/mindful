@@ -1,11 +1,23 @@
 [project]
 name = "mindful"
-version = "0.1.0"
-description = "Add your description here"
+dynamic = ["version"]
+description = "See through your long-term, self-evolving AI agent memories"
 license = "BSD-3-Clause"
 readme = "README.md"
 authors = [
     { name = "Glenn Miao", email = "one.lemorage@gmail.com" }
+]
+keywords = ["llm", "ai-agents", "memory", "memory-managements"]
+classifiers = [
+    "Typing :: Typed",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 requires-python = ">=3.10"
 dependencies = [
@@ -25,9 +37,35 @@ qdrant = [
     "qdrant-client>=1.14.2",
 ]
 
+[dependency-groups]
+dev = [
+    "litellm>=1.65.3",
+    "pre-commit>=4.2.0",
+    "pytest>=8.3.5",
+    "ruff>=0.11.2",
+]
+
+[project.urls]
+Repository = "https://github.com/lemorage/mindful"
+Issues = "https://github.com/lemorage/mindful/issues"
+
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "uv-dynamic-versioning"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+bump = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["mindful"]
+
+[tool.uv.sources]
+mindful = { workspace = true }
 
 [tool.pytest.ini_options]
 minversion = "8.0"
@@ -51,11 +89,3 @@ multi_line_output = 3
 include_trailing_comma = true
 force_grid_wrap = 2
 use_parentheses = true
-
-[dependency-groups]
-dev = [
-    "litellm>=1.65.3",
-    "pre-commit>=4.2.0",
-    "pytest>=8.3.5",
-    "ruff>=0.11.2",
-]
