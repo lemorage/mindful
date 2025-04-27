@@ -30,11 +30,14 @@ dependencies = [
 ]
 
 [project.scripts]
-mindful = "mindful:main"
+mindful = "mindful.cli:app"
 
 [project.optional-dependencies]
 qdrant = [
     "qdrant-client>=1.14.2",
+]
+cli = [
+    "typer>=0.15.2",
 ]
 
 [dependency-groups]

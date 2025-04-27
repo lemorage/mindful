@@ -1,6 +1,11 @@
 import logging
 from pathlib import Path
 import threading
+import typer
+import importlib.metadata
+
+app = typer.Typer(add_completion=False)
+
 
 logger = logging.getLogger("mindful")
 
@@ -26,3 +31,36 @@ def get_mindful_config_dir() -> Path:
             logger.error(f"Failed to create config directory {config_dir}: {e}")
             raise RuntimeError(f"Cannot create mindful config directory: {e}")
     return config_dir
+
+
+def version_callback(value: bool) -> None:
+    if value:
+        try:
+            ver = importlib.metadata.version("mindful")
+        except importlib.metadata.PackageNotFoundError:
+            ver = "unknown (not installed via package)"
+        typer.secho(f"Mindful version: {ver}", fg=typer.colors.BRIGHT_GREEN, bold=True)
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        None,
+        "--version",
+        "-V",
+        help="Show the current version and exit.",
+        callback=version_callback,
+        is_eager=True,
+    ),
+) -> None:
+    """
+    Mindful: See through your long-term, self-evolving AI agent memories 🧠
+    """
+    pass
+
+
+@app.command()
+def info() -> None:
+    """Show package info."""
+    typer.echo("Mindful: See through your long-term, self-evolving AI agent memories 🧠")
