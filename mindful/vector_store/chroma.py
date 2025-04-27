@@ -1,7 +1,6 @@
 from datetime import datetime
 import json
 import logging
-import os
 from typing import (
     Any,
     Dict,
@@ -10,7 +9,6 @@ from typing import (
     Tuple,
     cast,
 )
-import uuid
 
 from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
@@ -23,10 +21,10 @@ logger = logging.getLogger("mindful")
 try:
     import chromadb
     from chromadb.api.types import (
-        EmbeddingFunction,  # For potential custom embedding func
+        EmbeddingFunction,  # for potential custom embedding func
     )
     from chromadb.utils import (
-        embedding_functions,  # For default embedding functions
+        embedding_functions,  # for default embedding functions
     )
 
     chromadb_installed = True
@@ -46,17 +44,13 @@ def _tape_to_chroma_meta_and_doc(tape: Tape) -> Tuple[str, Dict[str, Any]]:
     # Convert non-primitive types in metadata to Chroma-compatible types (str, int, float, bool)
     for key, value in metadata.items():
         if isinstance(value, datetime):
-            metadata[key] = value.isoformat()  # Store datetime as ISO string
+            metadata[key] = value.isoformat()
+        elif key in {"status", "priority", "role", "category"}:
+            # Keep as native types for filtering/sorting
+            metadata[key] = value if isinstance(value, (str, int, float, bool)) else str(value)
         elif isinstance(value, (list, dict)):
-            # Chroma metadata supports basic types. Store lists/dicts as JSON strings?
-            # Or flatten if possible. Storing as JSON string is simpler.
-            try:
-                metadata[key] = json.dumps(value)
-            except TypeError:
-                logger.warning(f"Could not JSON serialize metadata field '{key}' for Chroma. Storing as string.")
-                metadata[key] = str(value)
+            metadata[key] = json.dumps(value)
         elif not isinstance(value, (str, int, float, bool)) and value is not None:
-            # Handle other potential types
             metadata[key] = str(value)
 
     # Keep only compatible types, remove None values as Chroma might dislike them
@@ -69,8 +63,8 @@ def _chroma_result_to_tape(
     ids: List[str],
     metadatas: List[Optional[Dict[str, Any]]],
     documents: List[Optional[str]],
-    distances: Optional[List[float]] = None,  # Only from query
-    embeddings: Optional[List[Optional[List[float]]]] = None,  # Only from get with include=['embeddings']
+    distances: Optional[List[float]] = None,  # only from query
+    embeddings: Optional[List[Optional[List[float]]]] = None,  # only from get with include=['embeddings']
 ) -> List[Optional[Tape]]:
     """Converts Chroma query/get results back to Tape objects."""
     tapes: List[Optional[Tape]] = []
@@ -467,73 +461,86 @@ class ChromaAdapter(StorageAdapter):
             logger.error("Chroma collection not initialized")
             return []
 
+        offset = offset or 0
+        if offset < 0 or (limit is not None and limit < 0):
+            logger.error(f"Invalid pagination parameters: offset={offset}, limit={limit}")
+            return []
+        if sort_by and sort_by not in {"created_at", "updated_at", "last_accessed", "expires_at", "priority", "status"}:
+            logger.warning(f"Unsupported sort_by field '{sort_by}'. Ignoring sorting.")
+            sort_by = None
+
         try:
-            # Translate filter_dict to Chroma's 'where' format
             where_filter = _build_chroma_where_filter(filter_dict) if filter_dict else None
             logger.debug(
                 f"Chroma find_ids_by_filter: where={where_filter}, limit={limit}, offset={offset}, sort_by={sort_by}, sort_desc={sort_desc}"
             )
 
-            # Fetch IDs using Chroma's get method with where filter
-            results = self.collection.get(
-                where=where_filter,
-                include=[],  # only fetch IDs to minimize data transfer
-            )
-            ids: List[str] = results.get("ids", [])
-            logger.debug(f"Retrieved {len(ids)} IDs from Chroma for filter: {filter_dict}")
+            # Initialize result list
+            all_ids: List[str] = []
+            batch_size = 1000  # TODO: adjustable based on empirical testing
+            current_offset = offset
 
-            # Apply sorting if requested (in-memory, as Chroma doesn't support native sorting)
-            if sort_by:
-                logger.warning(
-                    f"Sorting by '{sort_by}' is performed in-memory, which may be inefficient for large result sets."
-                )
-                # To sort, we need metadata for the sort_by field
-                results_with_meta = self.collection.get(
+            # Determine includes based on sorting needs
+            includes = ["metadatas"] if sort_by else []
+
+            # Fetch results in batches
+            while True:
+                # Apply limit to Chroma query (min of batch_size and remaining limit)
+                query_limit = min(batch_size, limit - len(all_ids)) if limit is not None else batch_size
+
+                results = self.collection.get(
                     where=where_filter,
-                    include=["metadatas"],
+                    limit=query_limit,
+                    offset=current_offset,
+                    include=includes,
                 )
-                ids = results_with_meta.get("ids", [])
-                metadatas = results_with_meta.get("metadatas", [])
+                ids = results.get("ids", [])
+                if not ids:
+                    break
 
-                if not ids or not metadatas:
-                    logger.debug("No results with metadata for sorting")
-                    return []
+                if sort_by:
+                    # Pair IDs with sort values for in-memory sorting
+                    metadatas = results.get("metadatas", [])
+                    id_value_pairs = []
+                    for id_, meta in zip(ids, metadatas):
+                        if meta and sort_by in meta:
+                            value = meta[sort_by]
+                            if sort_by in {"created_at", "updated_at", "last_accessed", "expires_at"} and isinstance(
+                                value, str
+                            ):
+                                try:
+                                    value = datetime.fromisoformat(value)
+                                except ValueError:
+                                    logger.warning(f"Invalid datetime format for {sort_by} in tape {id_}: {value}")
+                                    continue
+                            id_value_pairs.append((id_, value))
+                        else:
+                            logger.debug(f"Missing sort_by field '{sort_by}' in metadata for tape {id_}")
+                            continue
+                    all_ids.extend([pair[0] for pair in id_value_pairs])
+                else:
+                    all_ids.extend(ids)
 
-                # Pair IDs with sort values
-                id_value_pairs = []
-                for id_, meta in zip(ids, metadatas):
-                    if meta and sort_by in meta:
-                        value = meta[sort_by]
-                        if sort_by in ["created_at", "updated_at", "last_accessed", "expires_at"] and isinstance(
-                            value, str
-                        ):
-                            try:
-                                value = datetime.fromisoformat(value)
-                            except ValueError:
-                                logger.warning(f"Invalid datetime format for {sort_by} in tape {id_}: {value}")
-                                continue
-                        id_value_pairs.append((id_, value))
-                    else:
-                        logger.debug(f"Missing sort_by field '{sort_by}' in metadata for tape {id_}")
-                        continue
+                current_offset += len(ids)
+                if query_limit < batch_size or (limit is not None and len(all_ids) >= limit):
+                    break
 
-                # Sort pairs based on value
+            # Sort if needed (only if we didn't sort per batch)
+            if sort_by and all_ids:
+                # Sort full list based on previously collected id_value_pairs
                 id_value_pairs.sort(key=lambda x: x[1], reverse=sort_desc)
-                ids = [pair[0] for pair in id_value_pairs]
+                all_ids = (
+                    [pair[0] for pair in id_value_pairs][:limit]
+                    if limit is not None
+                    else [pair[0] for pair in id_value_pairs]
+                )
 
-            # Apply pagination
-            offset = offset or 0
-            if offset > len(ids):
-                logger.debug(f"Offset {offset} exceeds result count {len(ids)}")
-                return []
+            # Apply final limit if not already applied
+            if limit is not None and len(all_ids) > limit:
+                all_ids = all_ids[:limit]
 
-            if limit is not None:
-                ids = ids[offset : offset + limit]
-            else:
-                ids = ids[offset:]
-
-            logger.debug(f"Returning {len(ids)} IDs after applying offset={offset} and limit={limit}")
-            return ids
+            logger.debug(f"Returning {len(all_ids)} IDs after applying offset={offset} and limit={limit}")
+            return all_ids
 
         except Exception as e:
             logger.error(f"Failed to find IDs by filter in Chroma: {e}", exc_info=True)
