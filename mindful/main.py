@@ -20,7 +20,10 @@ from typing import (
 )
 
 from mindful.agent import MindfulAgent
-from mindful.config import MindfulConfig, load_mindful_config
+from mindful.config import (
+    MindfulConfig,
+    load_mindful_config,
+)
 from mindful.memory.tape import Tape
 from mindful.memory.tape_deck import TapeDeck
 from mindful.utils import MindfulLogFormatter
@@ -186,9 +189,10 @@ def mindful(
                                     raise ImportError("`pip install mindful[chroma]` needed.")
                             elif storage_type == "qdrant":
                                 try:
-                                    from mindful.vector_store.qdrant import QdrantAdapter
+                                    from mindful.vector_store.qdrant import (
+                                        QdrantAdapter,
+                                    )
 
-                                    pass
                                     adapter = QdrantAdapter()
                                 except ImportError:
                                     raise ImportError("`pip install mindful[qdrant]` needed.")

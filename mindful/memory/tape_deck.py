@@ -12,8 +12,8 @@ from typing import (
 )
 
 from mindful.agent import MindfulAgent
-from mindful.models import TapeMetadata
 from mindful.memory.tape import Tape
+from mindful.models import TapeMetadata
 from mindful.vector_store.storage import StorageAdapter
 
 logger = logging.getLogger("mindful")

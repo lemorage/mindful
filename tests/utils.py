@@ -16,7 +16,7 @@ class LiteLLMClient:
         self.model = model
         self.api_key = api_key or get_api_key("OPENAI_API_KEY")
 
-    @mindful(input="prompt")
+    @mindful(input="prompt", debug=True)
     def chat(self, prompt: str) -> str:
         """
         Generate a response from the model given a user prompt.
