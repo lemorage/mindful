@@ -1,0 +1,38 @@
+name: Publish Python Package to PyPI using uv
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build-and-publish:
+    name: Build and Publish to PyPI using uv
+    if: github.repository == 'lemorage/mindful'
+    runs-on: ubuntu-latest
+    permissions:
+      # REQUIRED for PyPI Trusted Publishing (OIDC), which uv publish supports directly
+      id-token: write
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.uv/bin" >> $GITHUB_PATH
+        shell: bash
+
+      - name: Build package using uv
+        run: uv build --no-sources
+
+      - name: Publish package to PyPI using uv
+        run: uv publish dist/*
