@@ -1,6 +1,8 @@
 import logging
 from typing import (
+    Dict,
     List,
+    Optional,
     Type,
 )
 
@@ -20,6 +22,17 @@ class TapeMetadata(BaseModel):
     category: str = Field(default="", description="A single, broad classification category for the content.")
     context: str = Field(default="", description="Concise situational or thematic context (max ~2-3 sentences).")
     keywords: List[str] = Field(default_factory=list, description="A list of 2-5 relevant keywords.")
+
+
+class TapeInsight(BaseModel):
+    should_archive: bool = Field(default=False, description="True if tape seems redundant/obsolete.")
+    updated_metadata: Optional[TapeMetadata] = Field(
+        default=None, description="Suggested new metadata if improvements found."
+    )
+    new_links: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Suggested new links from target tape: {neighbor_tape_id: 'description of relationship'}.",
+    )
 
 
 def pydantic_to_openai_tool(model: Type[BaseModel], name: str, description: str) -> ToolDefinition:
