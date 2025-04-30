@@ -18,6 +18,7 @@ from mindful.llm.llm_base import (
 from mindful.llm.openai import OpenAI
 from mindful.memory.tape import Tape
 from mindful.models import (
+    TapeInsight,
     TapeMetadata,
     pydantic_to_openai_tool,
 )
@@ -260,4 +261,76 @@ Summary:
 
         except Exception as e:
             logger.exception(f"LLM call failed during summarization: {e}", exc_info=True)
+            return None
+
+    def suggest_tape_refinements(self, target_tape: Tape, neighbor_tapes: List[Tape]) -> Optional[TapeInsight]:
+        """Uses LLM to analyze a tape and its neighbors, suggesting refinements."""
+        logger.debug(f"Requesting refinement suggestions for tape {target_tape.id}...")
+
+        # 1. Format input for LLM prompt
+        target_info = f"Target Tape (ID: {target_tape.id}):\nRole: {target_tape.role}\nCategory: {target_tape.metadata.category}\nContext: {target_tape.metadata.context}\nKeywords: {target_tape.metadata.keywords}\nContent: {target_tape.content[:500]}...\n---"
+        neighbors_info = "\n".join(
+            [
+                f"Neighbor {i + 1} (ID: {n.id}):\nRole: {n.role}\nCategory: {n.metadata.category}\nContext: {n.metadata.context}\nKeywords: {n.metadata.keywords}\nContent: {n.content[:300]}..."
+                for i, n in enumerate(neighbor_tapes)
+            ]
+        )
+
+        prompt = f"""You are a memory refinement AI. Analyze the 'Target Tape' in the context of its nearest 'Neighbor Tapes'.
+Based *only* on the provided information, suggest potential refinements by calling the '{TapeInsight.__name__}' tool.
+
+Tasks:
+1.  **Redundancy/Archival:** If the Target Tape's core information seems entirely covered or made obsolete by one or more neighbors, suggest archiving it (`should_archive: true`).
+2.  **Metadata Improvement:** If the Target's category, context, or keywords could be significantly improved based on the neighbors, provide *only the updated fields* in `updated_metadata`.
+3.  **Link Suggestion:** If a strong relationship exists between the Target and a Neighbor *that isn't already linked*, suggest adding it via `new_links`. Format as a JSON object where keys are neighbor Tape IDs and values are short strings describing the relationship (e.g., `{{"neighbor_id_1": "provides example for target", "neighbor_id_2": "contradicts target"}}`). Suggest only strong, specific relationships, not vague 'related'.
+
+{target_info}
+
+{neighbors_info}
+
+Call the '{TapeInsight.__name__}' tool with your suggestions. If no refinements are necessary, call the tool with default values.
+"""
+        messages: List[ChatMessage] = [{"role": "user", "content": prompt}]
+
+        # 2. Define Tool
+        try:
+            tool_def: ToolDefinition = {"type": "function", "function": TapeInsight.model_json_schema()}
+            tool_def["function"]["name"] = TapeInsight.__name__
+        except Exception as e:
+            logger.exception("Failed to generate schema for TapeInsight tool.", exc_info=True)
+            return None
+
+        # 3. Call LLM
+        tool_choice: ToolChoice = {"type": "function", "function": {"name": TapeInsight.__name__}}
+        parsed_response: Optional[ParsedResponse] = None
+        try:
+            parsed_response = self.provider.complete_chat(
+                model=self.completion_model,
+                messages=messages,
+                tools=[tool_def],
+                tool_choice=tool_choice,
+                temperature=0.2,
+            )
+        except Exception as e:
+            logger.exception(f"LLM call failed during refinement suggestion: {e}", exc_info=True)
+            return None
+
+        # 4. Parse and Validate Tool Call
+        if not parsed_response:
+            return None
+        tool_calls = parsed_response.get("tool_calls")
+        if not tool_calls:
+            logger.warning("Refinement suggestion: No tool call.")
+            return None
+
+        try:
+            arguments_str = tool_calls[0].get("function", {}).get("arguments", "{}")
+            extracted_data = json.loads(arguments_str)
+            suggestion = TapeInsight.model_validate(extracted_data)
+            logger.info(
+                f"Refinement suggestion received for tape {target_tape.id}: Archive={suggestion.should_archive}, MetaUpdate={suggestion.updated_metadata is not None}, Links={len(suggestion.new_links or {})}"
+            )
+            return suggestion
+        except Exception as e:
+            logger.error(f"Failed to parse/validate refinement suggestion: {e}. Data: {arguments_str}")
             return None
