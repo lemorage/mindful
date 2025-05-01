@@ -6,10 +6,9 @@ from datetime import (
 import logging
 import random
 from typing import (
-    Any,
-    Dict,
     List,
     Optional,
+    cast,
 )
 
 from mindful.agent import MindfulAgent
@@ -242,7 +241,9 @@ class MemoryEvolutionManager:
                 # filter_dict = {"status": "active", "created_after": age_threshold}
                 filter_dict = {"status": "active"}
                 neighbors_found = self.storage.vector_search(
-                    query_vector=seed_tape.embedding_vector, top_k=max_cluster_size, filter_dict=filter_dict  # type: ignore
+                    query_vector=cast(List[float], seed_tape.embedding_vector),  # here it can't be None
+                    top_k=max_cluster_size,
+                    filter_dict=filter_dict,
                 )
                 # Get IDs, excluding the seed itself, filter by similarity threshold?
                 similarity_threshold = 0.75
@@ -315,6 +316,128 @@ class MemoryEvolutionManager:
 
         except Exception as e:
             logger.exception(f"Error during summarization cycle: {e}", exc_info=True)
+
+    def run_refinement_cycle(
+        self,
+        max_candidates: int = 50,
+        k_neighbors: int = 5,
+        selection_strategy: str = "random_active",  # Or 'recent_added', 'recent_accessed'
+    ) -> None:
+        """
+        Selects candidate tapes, analyzes them with neighbors via LLM,
+        and applies suggested refinements (metadata updates, links, archiving).
+        """
+        logger.info(f"Starting refinement cycle: max_candidates={max_candidates}, k_neighbors={k_neighbors}")
+
+        try:
+            # --- 1. Select Candidate Tapes ---
+            candidate_ids = []
+            if selection_strategy == "random_active":
+                # Requires efficient filtering by status and random sampling support
+                all_active = self.storage.find_ids_by_filter(
+                    {"status": "active"}, limit=max_candidates * 5
+                )  # get more to sample
+                if all_active:
+                    candidate_ids = random.sample(all_active, min(len(all_active), max_candidates))
+            # TODO: Implement other selection strategies (e.g., based on created_at desc)
+            else:
+                logger.warning(f"Unknown refinement selection strategy: {selection_strategy}")
+                return
+
+            if not candidate_ids:
+                logger.info("Refinement cycle: No candidate tapes selected.")
+                return
+
+            logger.debug(f"Selected {len(candidate_ids)} candidates for refinement analysis.")
+            candidate_tapes = self.storage.get_tapes_batch(candidate_ids)
+
+            action_count = {"archived": 0, "meta_updated": 0, "links_added": 0}
+
+            # --- 2. Analyze each candidate ---
+            for tape in candidate_tapes:
+                if not tape or not tape.embedding_vector or tape.status != "active":
+                    continue  # Skip if tape fetch failed, no vector, or not active
+
+                # --- 3. Find Neighbors ---
+                try:
+                    neighbors_search = self.storage.vector_search(
+                        tape.embedding_vector, k_neighbors + 1, {"status": "active"}
+                    )
+                    neighbor_ids = [nid for nid, score in neighbors_search if nid != tape.id][:k_neighbors]
+                    if not neighbor_ids:
+                        continue
+
+                    neighbor_tapes_list = self.storage.get_tapes_batch(neighbor_ids)
+                    valid_neighbors = [n for n in neighbor_tapes_list if n]
+                    if not valid_neighbors:
+                        continue
+                except Exception as search_err:
+                    logger.error(f"Error finding neighbors for tape {tape.id}: {search_err}")
+                    continue
+
+                # --- 4. Get Refinement Suggestions from Agent ---
+                suggestion = self.agent.suggest_tape_refinements(tape, valid_neighbors)
+
+                if not suggestion:
+                    logger.debug(f"No valid refinement suggestions received for tape {tape.id}.")
+                    continue
+
+                # --- 5. Apply Suggestions ---
+                try:
+                    if suggestion.should_archive:
+                        tape.status = "archived"
+                        tape.updated_at = datetime.now(timezone.utc)
+                        self.storage.update_tape(tape)
+                        logger.info(f"Archived tape {tape.id} based on refinement suggestion.")
+                        action_count["archived"] += 1
+                        continue
+
+                    updated = False
+                    if suggestion.updated_metadata:
+                        # Apply updates carefully - only update fields provided
+                        if suggestion.updated_metadata.category is not None:
+                            tape.metadata.category = suggestion.updated_metadata.category
+                        if suggestion.updated_metadata.context is not None:
+                            tape.metadata.context = suggestion.updated_metadata.context
+                        if suggestion.updated_metadata.keywords:  # Check list isn't empty
+                            tape.metadata.keywords = suggestion.updated_metadata.keywords
+                        # TODO: Does changing metadata require re-embedding? Probably not unless context changes drastically.
+                        tape.updated_at = datetime.now(timezone.utc)
+                        self.storage.update_tape(tape)
+                        logger.info(f"Updated metadata for tape {tape.id} based on refinement suggestion.")
+                        action_count["meta_updated"] += 1
+                        updated = True
+
+                    if suggestion.new_links:
+                        links_added_count = 0
+                        for neighbor_id, description in suggestion.new_links.items():
+                            # Use TapeDeck's linking logic with description
+                            if not hasattr(self, "tape_deck"):
+                                logger.error("TapeDeck instance not available in MemoryEvolutionManager for linking.")
+                                continue
+
+                            success = self.tape_deck.link_tapes(
+                                tape_id=tape.id,
+                                tape_id2=neighbor_id,
+                                relation_type="inferred",  # assign a generic type for LLM suggestions? Or parse from description?
+                                description=description,
+                            )
+                            if success:
+                                links_added_count += 1
+                        if links_added_count > 0:
+                            logger.info(
+                                f"Added {links_added_count} new link(s) for tape {tape.id} based on suggestion."
+                            )
+                            action_count["links_added"] += links_added_count
+                            # updated = True # assuming link_tapes updates timestamp
+
+                except Exception as apply_err:
+                    logger.error(f"Error applying refinement suggestion for tape {tape.id}: {apply_err}")
+
+            logger.info(f"Refinement cycle finished. Actions: {action_count}")
+
+        except Exception as e:
+            logger.exception(f"Error during refinement cycle: {e}", exc_info=True)
 
     # --- TODO: We might need corresponding TapeDeck methods ---
     # These might call storage adapter methods directly or use TapeDeck's existing ones
