@@ -58,13 +58,8 @@ class TapeDeck:
                 logger.error("Embedding failed for new tape content. Aborting add.")
                 return None
 
-            # TODO: Let us change it next time!
-            category, context, keywords = "", "", []  # type: ignore
             try:
-                category, context, keywords = self.agent.generate_metadata(content)  # type: ignore
-                if category is None and context is None and keywords == []:
-                    raise ValueError("Metadata generation failed: returned (None, None, [])")
-                logger.debug("Metadata generated.")
+                category, context, keywords = self.agent.generate_metadata(content)
             except Exception as meta_err:
                 logger.warning(f"Metadata generation failed: {meta_err}. Continuing with default metadata.")
 

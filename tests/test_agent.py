@@ -143,8 +143,8 @@ def test_generate_metadata_invalid_json_args(mock_openai_agent):
     category, context, keywords = agent.generate_metadata("Some input")
 
     # Assert: Agent should handle parsing error and return defaults (None, None, [])
-    assert category is None
-    assert context is None
+    assert category == ""
+    assert context == ""
     assert keywords == []
     mock_provider.complete_chat.assert_called_once()
 
@@ -174,7 +174,7 @@ def test_generate_metadata_validation_error(mock_openai_agent):
     category, context, keywords = agent.generate_metadata("Validation input")
 
     # Assert: Agent should handle Pydantic validation error and return defaults
-    assert category is None  # TODO: this will be fixed in the future
+    assert category == ""
     assert context == "Validation test"
     assert keywords == ["test"]
     mock_provider.complete_chat.assert_called_once()
@@ -191,8 +191,8 @@ def test_generate_metadata_no_tool_call(mock_openai_agent):
     category, context, keywords = agent.generate_metadata("Generate metadata please")
 
     # Assert: Agent should handle missing tool call and return defaults
-    assert category is None
-    assert context is None
+    assert category == ""
+    assert context == ""
     assert keywords == []
     mock_provider.complete_chat.assert_called_once()
 

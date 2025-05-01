@@ -88,7 +88,7 @@ class MindfulAgent:
             f"Embedding model: '{self.embedding_model or 'Not Applicable'}'"
         )
 
-    def generate_metadata(self, content: str) -> Tuple[Optional[str], Optional[str], List[str]]:
+    def generate_metadata(self, content: str) -> Tuple[str, str, List[str]]:
         """
         Generate dynamic metadata (category, context, keywords) using LLM tool calling
         via the provider's `complete_chat` method.
@@ -97,7 +97,7 @@ class MindfulAgent:
             content: The text content to analyze.
 
         Returns:
-            A tuple containing (category, context, keywords). Returns (None, None, []) on failure.
+            A tuple containing (category, context, keywords). Returns ("", "", []) on failure.
         """
         logger.debug(f"Generating metadata using model '{self.completion_model}' for content: '{content[:100]}...'")
 
@@ -110,7 +110,7 @@ class MindfulAgent:
             metadata_tool_def["function"]["name"] = metadata_tool_name
         except Exception as e:
             logger.exception("Failed to generate JSON schema for TapeMetadata tool.", exc_info=True)
-            return None, None, []
+            return "", "", []
 
         # 2. Create the Prompt/Messages
         prompt = f"""
@@ -139,20 +139,20 @@ Content:
             )
         except NotImplementedError as nie:
             logger.error(f"Tool calling not implemented by provider {type(self.provider).__name__}: {nie}")
-            return None, None, []
+            return "", "", []
         except Exception as e:
             logger.exception(f"LLM call failed during metadata generation: {e}", exc_info=True)
-            return None, None, []
+            return "", "", []
 
         # 5. Parse and Validate the Result
         if not parsed_response:
             logger.error("Metadata generation failed: Received empty response from LLM provider.")
-            return None, None, []
+            return "", "", []
 
         tool_calls = parsed_response.get("tool_calls")
         if not tool_calls or not isinstance(tool_calls, list) or len(tool_calls) == 0:
             logger.warning(f"Metadata generation: LLM response did not contain tool calls. Response: {parsed_response}")
-            return None, None, []
+            return "", "", []
 
         metadata_call = tool_calls[0]
         if (
@@ -160,23 +160,23 @@ Content:
             or metadata_call.get("function", {}).get("name") != metadata_tool_name
         ):
             logger.warning(f"Metadata generation: Unexpected tool call received: {metadata_call}")
-            return None, None, []
+            return "", "", []
 
         arguments_str = metadata_call.get("function", {}).get("arguments", "{}")
         try:
             metadata = TapeMetadata.model_validate_json(arguments_str)
             logger.info(f"Metadata generated: Category='{metadata.category}', Keywords={metadata.keywords}")
             return (
-                str(metadata.category) if metadata.category else None,
-                str(metadata.context) if metadata.context else None,
+                str(metadata.category) if metadata.category else "",
+                str(metadata.context) if metadata.context else "",
                 metadata.keywords,
             )
         except json.JSONDecodeError:
             logger.error(f"Failed to decode JSON arguments from tool call: {arguments_str}")
-            return None, None, []
+            return "", "", []
         except Exception as e:
             logger.error(f"Failed to parse/validate metadata from tool call arguments: {e}. Data: {arguments_str}")
-            return None, None, []
+            return "", "", []
 
     def embed(self, content: str) -> Optional[List[float]]:
         """
