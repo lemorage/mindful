@@ -20,8 +20,8 @@ from mindful.memory.tape import Tape
 from mindful.models import (
     TapeInsight,
     TapeMetadata,
-    pydantic_to_openai_tool,
 )
+from mindful.helpers import pydantic_to_openai_tool
 from mindful.utils import get_api_key
 
 logger = logging.getLogger("mindful")

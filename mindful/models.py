@@ -3,7 +3,6 @@ from typing import (
     Dict,
     List,
     Optional,
-    Type,
 )
 
 from pydantic import (
@@ -11,9 +10,7 @@ from pydantic import (
     Field,
 )
 
-from mindful.llm.llm_base import ToolDefinition
-
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("mindful")
 
 
 class TapeMetadata(BaseModel):
@@ -25,6 +22,8 @@ class TapeMetadata(BaseModel):
 
 
 class TapeInsight(BaseModel):
+    """Represents an agent-inferred insight about a tape, suggesting potential actions or metadata updates."""
+
     should_archive: bool = Field(default=False, description="True if tape seems redundant/obsolete.")
     updated_metadata: Optional[TapeMetadata] = Field(
         default=None, description="Suggested new metadata if improvements found."
@@ -33,29 +32,3 @@ class TapeInsight(BaseModel):
         default=None,
         description="Suggested new links from target tape: {neighbor_tape_id: 'description of relationship'}.",
     )
-
-
-def pydantic_to_openai_tool(model: Type[BaseModel], name: str, description: str) -> ToolDefinition:
-    """
-    Convert a Pydantic model to an OpenAI function tool definition.
-    """
-    try:
-        schema = model.model_json_schema()
-    except Exception as e:
-        logger.error(f"Failed to generate schema for {model.__name__}: {e}")
-        raise ValueError(f"Invalid schema for {model.__name__}")
-
-    tool_def = {
-        "type": "function",
-        "function": {
-            "name": name,
-            "description": description,
-            "parameters": {
-                "type": "object",
-                "properties": schema["properties"],
-                "required": schema.get("required", []),
-            },
-        },
-    }
-
-    return tool_def
